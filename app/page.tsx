@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { DrumKit } from "./lib/sound/drum-kit";
+import CalibrationWizard from "./components/calibration/CalibrationWizard";
 
 type HandsType = {
   setOptions: (options: any) => void;
@@ -13,6 +14,10 @@ type HandsType = {
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [handPositions, setHandPositions] = useState<{
+    left?: { x: number; y: number };
+    right?: { x: number; y: number };
+  }>({});
   const [isActive, setIsActive] = useState(false);
   const handsRef = useRef<HandsType | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -40,7 +45,7 @@ export default function Home() {
       // Check if Hands is already available (from script tag or previous load)
       const checkAndInit = () => {
         const Hands = (window as any).Hands;
-        
+
         if (!Hands) {
           // If not available, load the script
           const script = document.createElement("script");
@@ -221,22 +226,19 @@ export default function Home() {
             }
 
             canvasCtx.save();
-            canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-            
-            // Draw video frame if available
-            if (results.image) {
-              canvasCtx.drawImage(
-                results.image,
-                0,
-                0,
-                canvasRef.current.width,
-                canvasRef.current.height
-              );
-            } else {
-              // Draw black background if no image
-              canvasCtx.fillStyle = "#000000";
-              canvasCtx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-            }
+            canvasCtx.clearRect(
+              0,
+              0,
+              canvasRef.current.width,
+              canvasRef.current.height
+            );
+            canvasCtx.drawImage(
+              results.image,
+              0,
+              0,
+              canvasRef.current.width,
+              canvasRef.current.height
+            );
 
             // Draw snare zones visualization
             const drawSnareZone = (zone: { x: number; y: number; width: number; height: number }, label: string, strokeColor: string, fillColor: string) => {
@@ -263,9 +265,51 @@ export default function Home() {
                 // Draw connections
                 drawConnections(canvasCtx, landmarks, HAND_CONNECTIONS);
                 // Draw landmarks
-                drawLandmarks(canvasCtx, landmarks, { color: "#00FF00", lineWidth: 2 });
+                drawLandmarks(canvasCtx, landmarks, {
+                  color: "#00FF00",
+                  lineWidth: 2,
+                });
               }
             }
+
+            // Extract wrist positions and handedness for calibration guidance
+            const positions: {
+              left?: { x: number; y: number };
+              right?: { x: number; y: number };
+            } = {};
+            try {
+              if (results.multiHandLandmarks && results.multiHandedness) {
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                  const landmarks = results.multiHandLandmarks[i];
+                  const handednessLabel =
+                    results.multiHandedness[i]?.label || "";
+                  // MediaPipe: landmark 0 is wrist; x,y are normalized [0..1]
+                  const wrist = landmarks[0];
+                  // The canvas/video element is mirrored via CSS (scale-x-[-1]) so
+                  // the visual left/right the user sees is flipped. To keep the
+                  // overlay guidance intuitive, compute the visual X by flipping
+                  // the normalized landmark X and assign handedness accordingly
+                  // (MediaPipe's "Left" refers to the subject's left).
+                  const visualX = 1 - (wrist.x ?? 0);
+                  if (handednessLabel.toLowerCase().includes("left")) {
+                    // subject's left appears on the right side of the mirrored view
+                    positions.right = { x: visualX, y: wrist.y };
+                  } else if (handednessLabel.toLowerCase().includes("right")) {
+                    // subject's right appears on the left side of the mirrored view
+                    positions.left = { x: visualX, y: wrist.y };
+                  }
+                }
+              }
+            } catch (err) {
+              // swallow any parsing errors
+              console.warn(
+                "Error parsing hand landmarks for calibration:",
+                err
+              );
+            }
+
+            // Update React state used by calibration UI
+            setHandPositions(positions);
 
             canvasCtx.restore();
           });
@@ -339,7 +383,9 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Error starting camera:", error);
-      alert("Failed to access camera. Please ensure you have granted camera permissions.");
+      alert(
+        "Failed to access camera. Please ensure you have granted camera permissions."
+      );
     }
   };
 
@@ -382,6 +428,10 @@ export default function Home() {
             height={480}
             style={{ background: "black" }}
           />
+          {/* Drums-only calibration overlay */}
+          <div className="absolute inset-0 pointer-events-none">
+            <CalibrationWizard handPositions={handPositions} />
+          </div>
         </div>
 
         <div className="flex gap-4">
@@ -408,12 +458,27 @@ export default function Home() {
 
 // Helper functions for drawing
 const HAND_CONNECTIONS = [
-  [0, 1], [1, 2], [2, 3], [3, 4],
-  [0, 5], [5, 6], [6, 7], [7, 8],
-  [5, 9], [9, 10], [10, 11], [11, 12],
-  [9, 13], [13, 14], [14, 15], [15, 16],
-  [13, 17], [17, 18], [18, 19], [19, 20],
-  [0, 17]
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 4],
+  [0, 5],
+  [5, 6],
+  [6, 7],
+  [7, 8],
+  [5, 9],
+  [9, 10],
+  [10, 11],
+  [11, 12],
+  [9, 13],
+  [13, 14],
+  [14, 15],
+  [15, 16],
+  [13, 17],
+  [17, 18],
+  [18, 19],
+  [19, 20],
+  [0, 17],
 ];
 
 function drawConnections(
