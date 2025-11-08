@@ -391,8 +391,7 @@ export default function Home() {
               if (results.multiHandLandmarks && results.multiHandedness) {
                 for (let i = 0; i < results.multiHandLandmarks.length; i++) {
                   const landmarks = results.multiHandLandmarks[i];
-                  const handednessLabel =
-                    results.multiHandedness[i]?.label || "";
+                  const handednessLabel = results.multiHandedness[i]?.label || "";
                   // MediaPipe: landmark 0 is wrist; x,y are normalized [0..1]
                   const wrist = landmarks[0];
                   // The canvas/video element is mirrored via CSS (scale-x-[-1]) so
@@ -412,10 +411,7 @@ export default function Home() {
               }
             } catch (err) {
               // swallow any parsing errors
-              console.warn(
-                "Error parsing hand landmarks for calibration:",
-                err
-              );
+              console.warn("Error parsing hand landmarks for calibration:", err);
             }
 
             // Update React state used by calibration UI
@@ -493,9 +489,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Error starting camera:", error);
-      alert(
-        "Failed to access camera. Please ensure you have granted camera permissions."
-      );
+      alert("Failed to access camera. Please ensure you have granted camera permissions.");
     }
   };
 
@@ -517,9 +511,7 @@ export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex min-h-screen w-full max-w-4xl flex-col items-center justify-center gap-8 py-16 px-8">
-        <h1 className="text-4xl font-bold text-black dark:text-zinc-50">
-          🥁 Air Drums
-        </h1>
+        <h1 className="text-4xl font-bold text-black dark:text-zinc-50">🥁 Air Drums</h1>
         <p className="text-lg text-gray-600 dark:text-gray-400">
           Move your hands quickly downward into the snare zones to play sounds
         </p>
@@ -548,7 +540,7 @@ export default function Home() {
           {!isActive ? (
             <button
               onClick={startCamera}
-              className="flex h-12 items-center justify-center gap-2 rounded-full bg-foreground px-8 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium"
+              className="flex h-12 items-center justify-center gap-2 rounded-full bg-primary px-8 text-secondary transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] font-bold"
             >
               Start Camera
             </button>
@@ -618,11 +610,7 @@ const HAND_CONNECTIONS = [
   [0, 17],
 ];
 
-function drawConnections(
-  ctx: CanvasRenderingContext2D,
-  landmarks: any[],
-  connections: number[][]
-) {
+function drawConnections(ctx: CanvasRenderingContext2D, landmarks: any[], connections: number[][]) {
   ctx.strokeStyle = "#00FF00";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -635,22 +623,11 @@ function drawConnections(
   ctx.stroke();
 }
 
-function drawLandmarks(
-  ctx: CanvasRenderingContext2D,
-  landmarks: any[],
-  style: { color: string; lineWidth: number }
-) {
+function drawLandmarks(ctx: CanvasRenderingContext2D, landmarks: any[], style: { color: string; lineWidth: number }) {
   ctx.fillStyle = style.color;
   for (const landmark of landmarks) {
     ctx.beginPath();
-    ctx.arc(
-      landmark.x * ctx.canvas.width,
-      landmark.y * ctx.canvas.height,
-      3,
-      0,
-      2 * Math.PI
-    );
+    ctx.arc(landmark.x * ctx.canvas.width, landmark.y * ctx.canvas.height, 3, 0, 2 * Math.PI);
     ctx.fill();
   }
 }
-
