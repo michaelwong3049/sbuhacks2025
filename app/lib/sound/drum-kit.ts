@@ -1,64 +1,75 @@
-import * as Tone from "tone";
-
 /**
- * Simple Drum Kit using Tone.js
- * For now, just a snare sound
+ * Low-latency DrumKit using the Web Audio API.
+ * Pre-generates a short noise buffer for snare hits and plays it immediately.
  */
 export class DrumKit {
-  private snare: Tone.NoiseSynth;
-  private filter: Tone.Filter;
+  private audioCtx: AudioContext | null = null;
+  private snareBuffer: AudioBuffer | null = null;
   private initialized: boolean = false;
 
-  constructor() {
-    // Create a snare drum using noise with envelope
-    this.snare = new Tone.NoiseSynth({
-      noise: {
-        type: "pink",
-      },
-      envelope: {
-        attack: 0.01,
-        decay: 0.2,
-        sustain: 0.1,
-        release: 0.3,
-      },
-    });
+  constructor() {}
 
-    // Add a filter to make it sound more like a snare
-    this.filter = new Tone.Filter({
-      frequency: 8000,
-      type: "highpass",
-    });
-
-    this.snare.connect(this.filter);
-    this.filter.toDestination();
-  }
-
-  /**
-   * Initialize Tone.js (must be called after user interaction)
-   */
   async initialize() {
-    if (!this.initialized) {
-      await Tone.start();
-      this.initialized = true;
+    if (this.initialized) return;
+    this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+    const sr = this.audioCtx.sampleRate;
+    const duration = 0.4; // seconds
+    const buffer = this.audioCtx.createBuffer(1, Math.floor(sr * duration), sr);
+    const data = buffer.getChannelData(0);
+
+    // Fill with decaying white noise to approximate a snare body
+    for (let i = 0; i < data.length; i++) {
+      const env = Math.exp(-i / (sr * 0.06)); // quick decay envelope
+      data[i] = (Math.random() * 2 - 1) * env * 0.8;
     }
+
+    this.snareBuffer = buffer;
+    this.initialized = true;
   }
 
-  /**
-   * Play a snare sound
-   */
-  async playSnare() {
-    if (!this.initialized) {
-      await this.initialize();
+  playSnare() {
+    if (!this.initialized || !this.audioCtx || !this.snareBuffer) {
+      // Best-effort initialize if not yet done (caller should call initialize on gesture)
+      this.initialize().catch(() => {});
+      return;
     }
-    this.snare.triggerAttackRelease("8n");
+
+    const ctx = this.audioCtx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.snareBuffer;
+
+    // Small shaping: bandpass + short gain envelope
+    const band = ctx.createBiquadFilter();
+    band.type = "bandpass";
+    band.frequency.value = 2000;
+    band.Q.value = 0.8;
+
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.exponentialRampToValueAtTime(1.0, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+
+    src.connect(band);
+    band.connect(gain);
+    gain.connect(ctx.destination);
+
+    src.start(now);
+    src.stop(now + 0.35);
   }
 
-  /**
-   * Dispose of the drum kit
-   */
   dispose() {
-    this.snare.dispose();
-    this.filter.dispose();
+    if (this.audioCtx) {
+      try {
+        this.audioCtx.close();
+      } catch (e) {
+        // ignore
+      }
+      this.audioCtx = null;
+    }
+    this.snareBuffer = null;
+    this.initialized = false;
   }
 }
 
