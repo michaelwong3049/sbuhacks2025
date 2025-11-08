@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { DrumKit } from "./lib/sound/drum-kit";
-import { HitboxDetector, Hitbox } from "./lib/motion/hitbox-detector";
 
 type HandsType = {
   setOptions: (options: any) => void;
@@ -19,48 +18,22 @@ export default function Home() {
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const drumKitRef = useRef<DrumKit | null>(null);
-  const hitboxDetectorRef = useRef<HitboxDetector | null>(null);
-  const lastFrameTimeRef = useRef<number>(0);
+  
+  // Store previous hand positions for velocity calculation
+  // Store both index finger and thumb positions (like holding a drumstick)
+  const previousPositionsRef = useRef<Map<number, { 
+    indexX: number; 
+    indexY: number; 
+    thumbX: number; 
+    thumbY: number; 
+    timestamp: number 
+  }>>(new Map());
 
   useEffect(() => {
     if (!videoRef.current || !canvasRef.current) return;
 
-    // Initialize drum kit
+    // Initialize drum kit for sound playback
     drumKitRef.current = new DrumKit();
-
-    // Initialize hitbox detector
-    hitboxDetectorRef.current = new HitboxDetector();
-
-    // Add a hitbox in the center of the screen
-    // Hitbox is defined in normalized coordinates (0-1)
-    // Making it bigger and more centered for easier testing
-    const hitbox: Hitbox = {
-      x: 0.3, // left edge (30% from left)
-      y: 0.3, // top edge (30% from top)
-      width: 0.4, // width (40% of screen)
-      height: 0.4, // height (40% of screen)
-    };
-    hitboxDetectorRef.current.addHitbox(hitbox);
-    console.log("Hitbox added:", hitbox, "Canvas size:", canvasRef.current?.width, canvasRef.current?.height);
-    
-    // Draw hitbox immediately as a test (before MediaPipe starts)
-    const drawInitialHitbox = () => {
-      const canvasCtx = canvasRef.current?.getContext("2d");
-      if (canvasCtx && canvasRef.current && hitboxDetectorRef.current) {
-        const hitboxes = hitboxDetectorRef.current.getHitboxes();
-        if (hitboxes.length > 0) {
-          canvasCtx.fillStyle = "#000000";
-          canvasCtx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-          hitboxes.forEach((hb) => {
-            drawHitbox(canvasCtx, hb, canvasRef.current!.width, canvasRef.current!.height);
-          });
-          console.log("Initial hitbox drawn!");
-        }
-      }
-    };
-    
-    // Try to draw immediately, and also after a short delay
-    setTimeout(drawInitialHitbox, 100);
 
     // Load MediaPipe Hands from CDN
     const initHands = () => {
@@ -107,11 +80,145 @@ export default function Home() {
             const canvasCtx = canvasRef.current?.getContext("2d");
             if (!canvasCtx || !canvasRef.current) return;
 
-            const now = Date.now();
-            const deltaTime = lastFrameTimeRef.current > 0 
-              ? (now - lastFrameTimeRef.current) / 1000 
-              : 0.016; // Assume 60fps for first frame
-            lastFrameTimeRef.current = now;
+            // Get canvas dimensions for coordinate conversion
+            const canvasWidth = canvasRef.current.width;
+            const canvasHeight = canvasRef.current.height;
+
+            // Helper function to convert normalized coordinates (0-1) to pixel coordinates
+            const toPixelCoords = (normalizedX: number, normalizedY: number) => {
+              return {
+                x: Math.round((1 - normalizedX) * canvasWidth),
+                y: Math.round((1 - normalizedY) * canvasHeight),
+              };
+            };
+
+            // Define two snare zones (one for each hand) in the lower half of canvas
+            // Made bigger and more rectangular
+            const snareZoneWidth = 200;  // Increased width
+            const snareZoneHeight = 150;   // Increased height
+            const snareZoneY = canvasHeight * 0.55; // Position in lower half (55% down)
+            
+            // Left snare zone (for left hand or hand 0)
+            const leftSnareZone = {
+              x: canvasWidth * 0.15, // 15% from left
+              y: snareZoneY,
+              width: snareZoneWidth,
+              height: snareZoneHeight,
+            };
+            
+            // Right snare zone (for right hand or hand 1)
+            const rightSnareZone = {
+              x: canvasWidth * 0.55, // 55% from left
+              y: snareZoneY,
+              width: snareZoneWidth,
+              height: snareZoneHeight,
+            };
+
+            // Velocity threshold for detecting a hit (pixels per second)
+            // Lowered to be more lenient - easier to trigger hits
+            const VELOCITY_THRESHOLD = 150; // Reduced from 300 to make it more sensitive
+
+            // Check if point is in a snare zone
+            const isInSnareZone = (x: number, y: number, zone: { x: number; y: number; width: number; height: number }) => {
+              return (
+                x >= zone.x &&
+                x <= zone.x + zone.width &&
+                y >= zone.y &&
+                y <= zone.y + zone.height
+              );
+            };
+            
+            // Get the appropriate snare zone for a hand (left hand = left zone, right hand = right zone)
+            const getSnareZoneForHand = (handIndex: number) => {
+              return handIndex === 0 ? leftSnareZone : rightSnareZone;
+            };
+
+            // Calculate velocity (pixels per second)
+            const calculateVelocity = (
+              currentX: number,
+              currentY: number,
+              prevX: number,
+              prevY: number,
+              timeDelta: number
+            ) => {
+              const distance = Math.sqrt(
+                Math.pow(currentX - prevX, 2) + Math.pow(currentY - prevY, 2)
+              );
+              return timeDelta > 0 ? distance / timeDelta : 0;
+            };
+
+            // Process hand detection and drum hits
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+              const currentTime = Date.now();
+
+              results.multiHandLandmarks.forEach((landmarks: any[], handIndex: number) => {
+                // Use both index finger tip (landmark 8) and thumb tip (landmark 4) 
+                // Like holding a drumstick between index and thumb
+                const indexTip = toPixelCoords(landmarks[8].x, landmarks[8].y);
+                const thumbTip = toPixelCoords(landmarks[4].x, landmarks[4].y);
+                
+                // Calculate midpoint between index and thumb (the "drumstick" position)
+                const drumstickX = (indexTip.x + thumbTip.x) / 2;
+                const drumstickY = (indexTip.y + thumbTip.y) / 2;
+
+                // Get the snare zone for this hand
+                const snareZone = getSnareZoneForHand(handIndex);
+
+                // Get previous position for this hand
+                const previous = previousPositionsRef.current.get(handIndex);
+
+                if (previous) {
+                  const timeDelta = (currentTime - previous.timestamp) / 1000; // Convert to seconds
+                  
+                  // Calculate previous drumstick position
+                  const prevDrumstickX = (previous.indexX + previous.thumbX) / 2;
+                  const prevDrumstickY = (previous.indexY + previous.thumbY) / 2;
+                  
+                  // Calculate ONLY downward (vertical) velocity
+                  // In our coordinate system, y increases as you go down (0,0 is top-left)
+                  // So downward movement means currentY > previousY
+                  const yDelta = drumstickY - prevDrumstickY;
+                  const downwardVelocity = timeDelta > 0 && yDelta > 0 ? yDelta / timeDelta : 0;
+                  
+                  // Only consider downward movement (positive yDelta means moving down)
+                  const isMovingDownward = yDelta > 0;
+
+                  // Check if either index finger OR thumb is in the snare zone
+                  // (like the drumstick tip hitting the snare)
+                  const indexInZone = isInSnareZone(indexTip.x, indexTip.y, snareZone);
+                  const thumbInZone = isInSnareZone(thumbTip.x, thumbTip.y, snareZone);
+                  const inZone = indexInZone || thumbInZone;
+                  
+                  // Check previous positions
+                  const prevIndexInZone = isInSnareZone(previous.indexX, previous.indexY, snareZone);
+                  const prevThumbInZone = isInSnareZone(previous.thumbX, previous.thumbY, snareZone);
+                  const wasInZone = prevIndexInZone || prevThumbInZone;
+
+                  // Detect hit: ONLY when:
+                  // 1. Currently inside zone (index OR thumb)
+                  // 2. Entering zone (not already inside)
+                  // 3. Has sufficient DOWNWARD velocity (ignoring horizontal/upward movement)
+                  // 4. Moving downward (toward snare, not away from it)
+                  if (inZone && downwardVelocity > VELOCITY_THRESHOLD && !wasInZone && isMovingDownward) {
+                    console.log(`🥁 SNARE HIT! Hand ${handIndex + 1} (${handIndex === 0 ? 'Left' : 'Right'} snare) - Downward Velocity: ${downwardVelocity.toFixed(2)} px/s, Index: (${indexTip.x}, ${indexTip.y}), Thumb: (${thumbTip.x}, ${thumbTip.y})`);
+                    
+                    // Play snare sound when hit is detected
+                    if (drumKitRef.current) {
+                      drumKitRef.current.playSnare().catch(console.error);
+                    }
+                  }
+                }
+
+                // Update previous position (both index and thumb)
+                previousPositionsRef.current.set(handIndex, {
+                  indexX: indexTip.x,
+                  indexY: indexTip.y,
+                  thumbX: thumbTip.x,
+                  thumbY: thumbTip.y,
+                  timestamp: currentTime,
+                });
+              });
+            }
 
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
@@ -131,51 +238,33 @@ export default function Home() {
               canvasCtx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
             }
 
-            // Process hand landmarks and detect hits
-            if (results.multiHandLandmarks && hitboxDetectorRef.current) {
-              results.multiHandLandmarks.forEach((landmarks: any[], handIndex: number) => {
-                // Use index finger tip (landmark 8) for hit detection
-                const indexFingerTip = landmarks[8];
-                if (indexFingerTip) {
-                  const handPosition = {
-                    x: indexFingerTip.x,
-                    y: indexFingerTip.y,
-                    z: indexFingerTip.z,
-                  };
+            // Draw snare zones visualization
+            const drawSnareZone = (zone: { x: number; y: number; width: number; height: number }, label: string, strokeColor: string, fillColor: string) => {
+              canvasCtx.strokeStyle = strokeColor;
+              canvasCtx.lineWidth = 3;
+              canvasCtx.setLineDash([5, 5]);
+              canvasCtx.strokeRect(zone.x, zone.y, zone.width, zone.height);
+              canvasCtx.setLineDash([]);
+              canvasCtx.fillStyle = fillColor;
+              canvasCtx.fillRect(zone.x, zone.y, zone.width, zone.height);
+              
+              // Label the snare zone
+              canvasCtx.fillStyle = strokeColor;
+              canvasCtx.font = "14px Arial";
+              canvasCtx.fillText(label, zone.x + 10, zone.y + 20);
+            };
+            
+            drawSnareZone(leftSnareZone, "🥁 Left Snare", "#4ECDC4", "rgba(78, 205, 196, 0.1)");
+            drawSnareZone(rightSnareZone, "🥁 Right Snare", "#FF6B6B", "rgba(255, 107, 107, 0.1)");
 
-                  // Detect hits
-                  const hitHitboxes = hitboxDetectorRef.current!.detectHits(
-                    handIndex,
-                    handPosition,
-                    deltaTime
-                  );
-
-                  // Play sound for each hit
-                  if (hitHitboxes.length > 0 && drumKitRef.current) {
-                    // Play snare for each hit (no need to await, sounds play independently)
-                    drumKitRef.current.playSnare().catch(console.error);
-                  }
-                }
-
+            // Draw hand landmarks
+            if (results.multiHandLandmarks) {
+              for (const landmarks of results.multiHandLandmarks) {
                 // Draw connections
                 drawConnections(canvasCtx, landmarks, HAND_CONNECTIONS);
                 // Draw landmarks
                 drawLandmarks(canvasCtx, landmarks, { color: "#00FF00", lineWidth: 2 });
-              });
-            }
-
-            // Draw hitbox AFTER drawing hands (so it's always on top and visible)
-            if (hitboxDetectorRef.current) {
-              const hitboxes = hitboxDetectorRef.current.getHitboxes();
-              if (hitboxes.length > 0) {
-                hitboxes.forEach((hb, index) => {
-                  drawHitbox(canvasCtx, hb, canvasRef.current!.width, canvasRef.current!.height);
-                });
-              } else {
-                console.log("No hitboxes found!");
               }
-            } else {
-              console.log("Hitbox detector not initialized!");
             }
 
             canvasCtx.restore();
@@ -273,10 +362,10 @@ export default function Home() {
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex min-h-screen w-full max-w-4xl flex-col items-center justify-center gap-8 py-16 px-8">
         <h1 className="text-4xl font-bold text-black dark:text-zinc-50">
-          🥁 Air Drums - Hit the Pink Zone!
+          🥁 Air Drums
         </h1>
         <p className="text-lg text-gray-600 dark:text-gray-400">
-          Move your hand quickly into the pink hit zone to play a snare sound
+          Move your hands quickly downward into the snare zones to play sounds
         </p>
 
         <div className="relative w-full max-w-2xl rounded-lg border-2 border-zinc-300 dark:border-zinc-700 overflow-hidden bg-black">
@@ -363,58 +452,3 @@ function drawLandmarks(
   }
 }
 
-function drawHitbox(
-  ctx: CanvasRenderingContext2D,
-  hitbox: Hitbox,
-  canvasWidth: number,
-  canvasHeight: number
-) {
-  const x = hitbox.x * canvasWidth;
-  const y = hitbox.y * canvasHeight;
-  const width = hitbox.width * canvasWidth;
-  const height = hitbox.height * canvasHeight;
-
-  // Draw hitbox fill (semi-transparent pink) - more opaque
-  ctx.fillStyle = "rgba(255, 0, 255, 0.4)";
-  ctx.fillRect(x, y, width, height);
-
-  // Draw hitbox border (bright pink, thicker)
-  ctx.strokeStyle = "#FF00FF";
-  ctx.lineWidth = 5;
-  ctx.setLineDash([15, 5]);
-  ctx.strokeRect(x, y, width, height);
-  ctx.setLineDash([]);
-
-  // Draw additional outer glow
-  ctx.strokeStyle = "rgba(255, 0, 255, 0.6)";
-  ctx.lineWidth = 8;
-  ctx.strokeRect(x - 2, y - 2, width + 4, height + 4);
-
-  // Draw hitbox label with background
-  ctx.save();
-  ctx.fillStyle = "#FF00FF";
-  ctx.font = "bold 24px Arial";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const text = "HIT ZONE";
-  const textX = x + width / 2;
-  const textY = y + height / 2;
-  
-  // Draw text background (larger)
-  const textMetrics = ctx.measureText(text);
-  ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
-  ctx.fillRect(
-    textX - textMetrics.width / 2 - 10, 
-    textY - 18, 
-    textMetrics.width + 20, 
-    36
-  );
-  
-  // Draw text
-  ctx.fillStyle = "#FFFFFF";
-  ctx.strokeStyle = "#FF00FF";
-  ctx.lineWidth = 2;
-  ctx.strokeText(text, textX, textY);
-  ctx.fillText(text, textX, textY);
-  ctx.restore();
-}
