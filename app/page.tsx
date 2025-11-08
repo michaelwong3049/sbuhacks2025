@@ -23,16 +23,21 @@ export default function Home() {
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const drumKitRef = useRef<DrumKit | null>(null);
-  
+
   // Store previous hand positions for velocity calculation
   // Store both index finger and thumb positions (like holding a drumstick)
-  const previousPositionsRef = useRef<Map<number, { 
-    indexX: number; 
-    indexY: number; 
-    thumbX: number; 
-    thumbY: number; 
-    timestamp: number 
-  }>>(new Map());
+  const previousPositionsRef = useRef<
+    Map<
+      number,
+      {
+        indexX: number;
+        indexY: number;
+        thumbX: number;
+        thumbY: number;
+        timestamp: number;
+      }
+    >
+  >(new Map());
 
   useEffect(() => {
     if (!videoRef.current || !canvasRef.current) return;
@@ -99,10 +104,10 @@ export default function Home() {
 
             // Define two snare zones (one for each hand) in the lower half of canvas
             // Made bigger and more rectangular
-            const snareZoneWidth = 200;  // Increased width
-            const snareZoneHeight = 150;   // Increased height
+            const snareZoneWidth = 200; // Increased width
+            const snareZoneHeight = 150; // Increased height
             const snareZoneY = canvasHeight * 0.55; // Position in lower half (55% down)
-            
+
             // Left snare zone (for left hand or hand 0)
             const leftSnareZone = {
               x: canvasWidth * 0.15, // 15% from left
@@ -110,7 +115,7 @@ export default function Home() {
               width: snareZoneWidth,
               height: snareZoneHeight,
             };
-            
+
             // Right snare zone (for right hand or hand 1)
             const rightSnareZone = {
               x: canvasWidth * 0.55, // 55% from left
@@ -124,15 +129,14 @@ export default function Home() {
             const VELOCITY_THRESHOLD = 150; // Reduced from 300 to make it more sensitive
 
             // Check if point is in a snare zone
-            const isInSnareZone = (x: number, y: number, zone: { x: number; y: number; width: number; height: number }) => {
-              return (
-                x >= zone.x &&
-                x <= zone.x + zone.width &&
-                y >= zone.y &&
-                y <= zone.y + zone.height
-              );
+            const isInSnareZone = (
+              x: number,
+              y: number,
+              zone: { x: number; y: number; width: number; height: number }
+            ) => {
+              return x >= zone.x && x <= zone.x + zone.width && y >= zone.y && y <= zone.y + zone.height;
             };
-            
+
             // Get the appropriate snare zone for a hand (left hand = left zone, right hand = right zone)
             const getSnareZoneForHand = (handIndex: number) => {
               return handIndex === 0 ? leftSnareZone : rightSnareZone;
@@ -146,9 +150,7 @@ export default function Home() {
               prevY: number,
               timeDelta: number
             ) => {
-              const distance = Math.sqrt(
-                Math.pow(currentX - prevX, 2) + Math.pow(currentY - prevY, 2)
-              );
+              const distance = Math.sqrt(Math.pow(currentX - prevX, 2) + Math.pow(currentY - prevY, 2));
               return timeDelta > 0 ? distance / timeDelta : 0;
             };
 
@@ -157,11 +159,11 @@ export default function Home() {
               const currentTime = Date.now();
 
               results.multiHandLandmarks.forEach((landmarks: any[], handIndex: number) => {
-                // Use both index finger tip (landmark 8) and thumb tip (landmark 4) 
+                // Use both index finger tip (landmark 8) and thumb tip (landmark 4)
                 // Like holding a drumstick between index and thumb
                 const indexTip = toPixelCoords(landmarks[8].x, landmarks[8].y);
                 const thumbTip = toPixelCoords(landmarks[4].x, landmarks[4].y);
-                
+
                 // Calculate midpoint between index and thumb (the "drumstick" position)
                 const drumstickX = (indexTip.x + thumbTip.x) / 2;
                 const drumstickY = (indexTip.y + thumbTip.y) / 2;
@@ -174,17 +176,17 @@ export default function Home() {
 
                 if (previous) {
                   const timeDelta = (currentTime - previous.timestamp) / 1000; // Convert to seconds
-                  
+
                   // Calculate previous drumstick position
                   const prevDrumstickX = (previous.indexX + previous.thumbX) / 2;
                   const prevDrumstickY = (previous.indexY + previous.thumbY) / 2;
-                  
+
                   // Calculate ONLY downward (vertical) velocity
                   // In our coordinate system, y increases as you go down (0,0 is top-left)
                   // So downward movement means currentY > previousY
                   const yDelta = drumstickY - prevDrumstickY;
                   const downwardVelocity = timeDelta > 0 && yDelta > 0 ? yDelta / timeDelta : 0;
-                  
+
                   // Only consider downward movement (positive yDelta means moving down)
                   const isMovingDownward = yDelta > 0;
 
@@ -193,7 +195,7 @@ export default function Home() {
                   const indexInZone = isInSnareZone(indexTip.x, indexTip.y, snareZone);
                   const thumbInZone = isInSnareZone(thumbTip.x, thumbTip.y, snareZone);
                   const inZone = indexInZone || thumbInZone;
-                  
+
                   // Check previous positions
                   const prevIndexInZone = isInSnareZone(previous.indexX, previous.indexY, snareZone);
                   const prevThumbInZone = isInSnareZone(previous.thumbX, previous.thumbY, snareZone);
@@ -205,8 +207,14 @@ export default function Home() {
                   // 3. Has sufficient DOWNWARD velocity (ignoring horizontal/upward movement)
                   // 4. Moving downward (toward snare, not away from it)
                   if (inZone && downwardVelocity > VELOCITY_THRESHOLD && !wasInZone && isMovingDownward) {
-                    console.log(`🥁 SNARE HIT! Hand ${handIndex + 1} (${handIndex === 0 ? 'Left' : 'Right'} snare) - Downward Velocity: ${downwardVelocity.toFixed(2)} px/s, Index: (${indexTip.x}, ${indexTip.y}), Thumb: (${thumbTip.x}, ${thumbTip.y})`);
-                    
+                    console.log(
+                      `🥁 SNARE HIT! Hand ${handIndex + 1} (${
+                        handIndex === 0 ? "Left" : "Right"
+                      } snare) - Downward Velocity: ${downwardVelocity.toFixed(2)} px/s, Index: (${indexTip.x}, ${
+                        indexTip.y
+                      }), Thumb: (${thumbTip.x}, ${thumbTip.y})`
+                    );
+
                     // Play snare sound when hit is detected
                     if (drumKitRef.current) {
                       drumKitRef.current.playSnare().catch(console.error);
@@ -226,22 +234,16 @@ export default function Home() {
             }
 
             canvasCtx.save();
-            canvasCtx.clearRect(
-              0,
-              0,
-              canvasRef.current.width,
-              canvasRef.current.height
-            );
-            canvasCtx.drawImage(
-              results.image,
-              0,
-              0,
-              canvasRef.current.width,
-              canvasRef.current.height
-            );
+            canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
 
             // Draw snare zones visualization
-            const drawSnareZone = (zone: { x: number; y: number; width: number; height: number }, label: string, strokeColor: string, fillColor: string) => {
+            const drawSnareZone = (
+              zone: { x: number; y: number; width: number; height: number },
+              label: string,
+              strokeColor: string,
+              fillColor: string
+            ) => {
               canvasCtx.strokeStyle = strokeColor;
               canvasCtx.lineWidth = 3;
               canvasCtx.setLineDash([5, 5]);
@@ -249,13 +251,13 @@ export default function Home() {
               canvasCtx.setLineDash([]);
               canvasCtx.fillStyle = fillColor;
               canvasCtx.fillRect(zone.x, zone.y, zone.width, zone.height);
-              
+
               // Label the snare zone
               canvasCtx.fillStyle = strokeColor;
               canvasCtx.font = "14px Arial";
               canvasCtx.fillText(label, zone.x + 10, zone.y + 20);
             };
-            
+
             drawSnareZone(leftSnareZone, "🥁 Left Snare", "#4ECDC4", "rgba(78, 205, 196, 0.1)");
             drawSnareZone(rightSnareZone, "🥁 Right Snare", "#FF6B6B", "rgba(255, 107, 107, 0.1)");
 
@@ -281,8 +283,7 @@ export default function Home() {
               if (results.multiHandLandmarks && results.multiHandedness) {
                 for (let i = 0; i < results.multiHandLandmarks.length; i++) {
                   const landmarks = results.multiHandLandmarks[i];
-                  const handednessLabel =
-                    results.multiHandedness[i]?.label || "";
+                  const handednessLabel = results.multiHandedness[i]?.label || "";
                   // MediaPipe: landmark 0 is wrist; x,y are normalized [0..1]
                   const wrist = landmarks[0];
                   // The canvas/video element is mirrored via CSS (scale-x-[-1]) so
@@ -302,10 +303,7 @@ export default function Home() {
               }
             } catch (err) {
               // swallow any parsing errors
-              console.warn(
-                "Error parsing hand landmarks for calibration:",
-                err
-              );
+              console.warn("Error parsing hand landmarks for calibration:", err);
             }
 
             // Update React state used by calibration UI
@@ -383,9 +381,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Error starting camera:", error);
-      alert(
-        "Failed to access camera. Please ensure you have granted camera permissions."
-      );
+      alert("Failed to access camera. Please ensure you have granted camera permissions.");
     }
   };
 
@@ -407,9 +403,7 @@ export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex min-h-screen w-full max-w-4xl flex-col items-center justify-center gap-8 py-16 px-8">
-        <h1 className="text-4xl font-bold text-black dark:text-zinc-50">
-          🥁 Air Drums
-        </h1>
+        <h1 className="text-4xl font-bold text-black dark:text-zinc-50">🥁 Air Drums</h1>
         <p className="text-lg text-gray-600 dark:text-gray-400">
           Move your hands quickly downward into the snare zones to play sounds
         </p>
@@ -438,7 +432,7 @@ export default function Home() {
           {!isActive ? (
             <button
               onClick={startCamera}
-              className="flex h-12 items-center justify-center gap-2 rounded-full bg-foreground px-8 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium"
+              className="flex h-12 items-center justify-center gap-2 rounded-full bg-primary px-8 text-secondary transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] font-bold"
             >
               Start Camera
             </button>
@@ -481,11 +475,7 @@ const HAND_CONNECTIONS = [
   [0, 17],
 ];
 
-function drawConnections(
-  ctx: CanvasRenderingContext2D,
-  landmarks: any[],
-  connections: number[][]
-) {
+function drawConnections(ctx: CanvasRenderingContext2D, landmarks: any[], connections: number[][]) {
   ctx.strokeStyle = "#00FF00";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -498,22 +488,11 @@ function drawConnections(
   ctx.stroke();
 }
 
-function drawLandmarks(
-  ctx: CanvasRenderingContext2D,
-  landmarks: any[],
-  style: { color: string; lineWidth: number }
-) {
+function drawLandmarks(ctx: CanvasRenderingContext2D, landmarks: any[], style: { color: string; lineWidth: number }) {
   ctx.fillStyle = style.color;
   for (const landmark of landmarks) {
     ctx.beginPath();
-    ctx.arc(
-      landmark.x * ctx.canvas.width,
-      landmark.y * ctx.canvas.height,
-      3,
-      0,
-      2 * Math.PI
-    );
+    ctx.arc(landmark.x * ctx.canvas.width, landmark.y * ctx.canvas.height, 3, 0, 2 * Math.PI);
     ctx.fill();
   }
 }
-
