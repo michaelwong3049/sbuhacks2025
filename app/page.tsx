@@ -25,7 +25,8 @@ export default function Home() {
   const animationFrameRef = useRef<number | null>(null);
   const drumKitRef = useRef<DrumKit | null>(null);
   // Make default more forgiving so it's easier to trigger; user can lower further with slider.
-  const [velocityThreshold, setVelocityThreshold] = useState<number>(2000);
+  // Lower default a bit to make zones easier to hit.
+  const [velocityThreshold, setVelocityThreshold] = useState<number>(1500);
   const [handSpeeds, setHandSpeeds] = useState<Record<number, number>>({});
   
   // Store previous hand positions for velocity calculation
@@ -40,6 +41,8 @@ export default function Home() {
   const lastTriggerRef = useRef<Map<number, number>>(new Map());
   // Per-drum cooldowns keyed by 'left'|'right' to reduce double-triggering on the same visual drum
   const drumLastTriggerRef = useRef<Map<string, number>>(new Map());
+  // Visual flash timestamps for zones when a hit is registered
+  const hitFlashRef = useRef<Map<string, number>>(new Map());
   const prevVerticalSpeedRef = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
@@ -127,13 +130,16 @@ export default function Home() {
             const DRUM_COOLDOWN_MS = 350; // per-drum cooldown to reduce double hits on same visual drum (tuned up)
 
             // Precompute drum positions for per-drum cooldown checks (mirror-consistent with drawing below)
-            const drumRadius = Math.min(canvasWidth, canvasHeight) * 0.12;
-            const drumY = canvasHeight * 0.75; // place drums toward the bottom
+            // Slightly larger drums to make zones more forgiving
+            const drumRadius = Math.min(canvasWidth, canvasHeight) * 0.14;
+            const drumY = canvasHeight * 0.74; // place drums toward the bottom
             const leftDrumX = canvasWidth * 0.2;
             const rightDrumX = canvasWidth * 0.8;
 
+            // A single timestamp used for cooldowns and hit flashes
+            const currentTime = performance.now();
+
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-              const currentTime = performance.now();
 
               results.multiHandLandmarks.forEach((landmarks: any[], handIndex: number) => {
                 // Use index finger tip (landmark 8) for velocity tracking
@@ -143,30 +149,112 @@ export default function Home() {
 
                 if (previous) {
                   const timeDelta = (currentTime - previous.timestamp) / 1000; // seconds
+                  // Convert to visual X coordinates because the canvas drawing
+                  // context is flipped horizontally (we mirrored the canvas
+                  // for a user-friendly view). The indexTip.x returned by
+                  // toPixelCoords is in logical (sensor) coords; convert to
+                  // visual coords by mirroring across the canvas width.
+                  const indexVisualX = canvasWidth - indexTip.x;
+                  const prevIndexVisualX = canvasWidth - previous.indexX;
                   const dy = indexTip.y - previous.indexY;
-                  // Only consider downward movement (positive dy in canvas coordinates)
+                  const dx = indexVisualX - prevIndexVisualX;
+                  // Speeds in px/s
                   const verticalSpeed = timeDelta > 0 ? dy / timeDelta : 0; // px/s downward
+                  const horizontalSpeed = timeDelta > 0 ? dx / timeDelta : 0; // px/s rightward
 
                   const lastTrigger = lastTriggerRef.current.get(handIndex) || 0;
                   // Update debug UI with current vertical speed for this hand
                   setHandSpeeds((prev) => ({ ...prev, [handIndex]: verticalSpeed }));
 
-                  // Only trigger on a rising edge: previous vertical speed was below threshold
-                  // and current vertical speed exceeds it. This reduces double-triggers
-                  // caused by a single movement being sampled multiple times.
-                  const prevSpeed = prevVerticalSpeedRef.current.get(handIndex) || 0;
-                  const MIN_DY_PIXELS = 6; // require at least a small displacement to ignore jitter
+                  // Zone detection thresholds
+                  const MIN_DY_PIXELS = 6; // displacement guard
+                  // Reduce horizontal requirement so side snares are easier to hit
+                  const HORIZ_SPEED_THRESHOLD = 350; // px/s horizontal requirement for side snares
 
+                  // Define zones (match drawing positions)
+                  const bassX = canvasWidth * 0.5;
+                  const bassY = canvasHeight * 0.88;
+                  const bassRadius = Math.min(canvasWidth, canvasHeight) * 0.18;
+
+                  const hiHatX = canvasWidth * 0.5;
+                  const hiHatY = canvasHeight * 0.12; // move hi-hat to top
+                  const hiHatRadius = Math.min(canvasWidth, canvasHeight) * 0.12; // make hi-hat easier to hit
+
+                  // distance to each zone center
+                  const distLeft = Math.hypot(indexVisualX - leftDrumX, indexTip.y - drumY);
+                  const distRight = Math.hypot(indexVisualX - rightDrumX, indexTip.y - drumY);
+                  const distBass = Math.hypot(indexVisualX - bassX, indexTip.y - bassY);
+                  const distHiHat = Math.hypot(indexVisualX - hiHatX, indexTip.y - hiHatY);
+
+                  // Helper to register hit (set per-hand and per-zone cooldowns and visual flash)
+                  const registerHit = (zoneId: string, play: () => void) => {
+                    const lastDrumTrigger = drumLastTriggerRef.current.get(zoneId) || 0;
+                    if ((currentTime - lastDrumTrigger) <= DRUM_COOLDOWN_MS) return false;
+                    // pass per-hand cooldown too
+                    if ((currentTime - lastTrigger) <= COOLDOWN_MS) return false;
+                    // trigger
+                    play();
+                    lastTriggerRef.current.set(handIndex, currentTime);
+                    drumLastTriggerRef.current.set(zoneId, currentTime);
+                    // record flash
+                    (hitFlashRef.current as Map<string, number>).set(zoneId, currentTime);
+                    return true;
+                  };
+
+                  // Read previous vertical speed once (default 0)
+                  const prevSpeed = prevVerticalSpeedRef.current.get(handIndex) || 0;
+
+                  // Side snares require downward + horizontal motion towards the drum
                   if (
+                    distLeft < drumRadius &&
                     dy > MIN_DY_PIXELS &&
                     verticalSpeed > VELOCITY_THRESHOLD &&
-                    prevSpeed <= VELOCITY_THRESHOLD &&
-                    (currentTime - lastTrigger) > COOLDOWN_MS
+                    prevSpeed <= VELOCITY_THRESHOLD
                   ) {
-                    console.log(`🥁 DOWNWARD HIT! Hand ${handIndex + 1} verticalSpeed=${verticalSpeed.toFixed(2)} px/s (prev=${prevSpeed.toFixed(2)})`);
+                    // moving towards left drum means horizontalSpeed is negative (leftward) if approaching
+                    if (horizontalSpeed < -HORIZ_SPEED_THRESHOLD) {
+                      if (drumKitRef.current) {
+                        registerHit("left", () => drumKitRef.current!.playSnare());
+                      }
+                    }
+                  }
+
+                  if (
+                    distRight < drumRadius &&
+                    dy > MIN_DY_PIXELS &&
+                    verticalSpeed > VELOCITY_THRESHOLD &&
+                    prevSpeed <= VELOCITY_THRESHOLD
+                  ) {
+                    // moving towards right drum means horizontalSpeed is positive (rightward)
+                    if (horizontalSpeed > HORIZ_SPEED_THRESHOLD) {
+                      if (drumKitRef.current) {
+                        registerHit("right", () => drumKitRef.current!.playSnare());
+                      }
+                    }
+                  }
+
+                  // Bass (kick) at bottom: only downward movement needed
+                  if (
+                    distBass < bassRadius &&
+                    dy > MIN_DY_PIXELS &&
+                    verticalSpeed > VELOCITY_THRESHOLD &&
+                    prevSpeed <= VELOCITY_THRESHOLD
+                  ) {
                     if (drumKitRef.current) {
-                      drumKitRef.current.playSnare();
-                      lastTriggerRef.current.set(handIndex, currentTime);
+                      registerHit("bass", () => drumKitRef.current!.playKick());
+                    }
+                  }
+
+                  // Hi-hat: top zone, triggered by upward motion (user flicks up into the hi-hat)
+                  // Upward motion produces negative verticalSpeed (dy < 0)
+                  if (
+                    distHiHat < hiHatRadius &&
+                    dy < -MIN_DY_PIXELS &&
+                    verticalSpeed < -VELOCITY_THRESHOLD &&
+                    prevSpeed >= -VELOCITY_THRESHOLD
+                  ) {
+                    if (drumKitRef.current) {
+                      registerHit("hihat", () => drumKitRef.current!.playHiHat());
                     }
                   }
 
@@ -241,9 +329,45 @@ export default function Home() {
               canvasCtx.fillText(label, x, y + radius + 18);
             };
 
-            // Positions for left/right drums (visual guidance) were precomputed above
-            drawDrum(leftDrumX, drumY, drumRadius, "🥁 Snare (L)", "#4ECDC4");
-            drawDrum(rightDrumX, drumY, drumRadius, "🥁 Snare (R)", "#FF6B6B");
+            // Provide visual flash when a drum was recently hit
+            const flashLeft = (hitFlashRef.current.get("left") || 0);
+            const flashRight = (hitFlashRef.current.get("right") || 0);
+            const flashBass = (hitFlashRef.current.get("bass") || 0);
+            const flashHiHat = (hitFlashRef.current.get("hihat") || 0);
+            const FLASH_DURATION = 180; // ms
+
+            const drawDrumWithFlash = (id: string, x: number, y: number, radius: number, label: string, fillColor: string, emoji?: string) => {
+              const flashAge = currentTime - (hitFlashRef.current.get(id) || 0);
+              if (flashAge <= FLASH_DURATION) {
+                const alpha = 1 - flashAge / FLASH_DURATION;
+                // bright rim
+                canvasCtx.beginPath();
+                canvasCtx.arc(x, y, radius + 12, 0, Math.PI * 2);
+                canvasCtx.fillStyle = `rgba(255,255,200,${0.5 * alpha})`;
+                canvasCtx.fill();
+              }
+              drawDrum(x, y, radius, label, fillColor);
+              if (emoji) {
+                canvasCtx.font = `${Math.max(16, Math.round(radius * 0.9))}px Arial`;
+                canvasCtx.fillText(emoji, x, y + Math.round(radius * 0.05));
+              }
+            };
+
+            // Draw left/right snares
+            drawDrumWithFlash("left", leftDrumX, drumY, drumRadius, "🥁 Snare (L)", "#4ECDC4", "🥁");
+            drawDrumWithFlash("right", rightDrumX, drumY, drumRadius, "🥁 Snare (R)", "#FF6B6B", "🥁");
+
+            // Draw bass (kick) at bottom center
+            const bassX = canvasWidth * 0.5;
+            const bassY = canvasHeight * 0.88;
+            const bassRadius = Math.min(canvasWidth, canvasHeight) * 0.18;
+            drawDrumWithFlash("bass", bassX, bassY, bassRadius, "🔘 Bass", "#222222", "🔊");
+
+            // Draw hi-hat at top center (match detection zone)
+            const hiHatX = canvasWidth * 0.5;
+            const hiHatY = canvasHeight * 0.12;
+            const hiHatRadius = Math.min(canvasWidth, canvasHeight) * 0.12;
+            drawDrumWithFlash("hihat", hiHatX, hiHatY, hiHatRadius, "🎧 Hi-Hat", "#B4C6FF", "🎵");
 
             // Draw hand landmarks
             if (results.multiHandLandmarks) {
