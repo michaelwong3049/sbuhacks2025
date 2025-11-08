@@ -1,14 +1,20 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { Instrument } from "@/components/practice/instruments/instrument-types";
+import { Video, VideoOff } from "lucide-react";
 
 export default function CalibrationWizard({
   handPositions,
+  instrument = "drums",
+  isCameraActive = false,
 }: {
   handPositions: {
     left?: { x: number; y: number };
     right?: { x: number; y: number };
   };
+  instrument?: Instrument;
+  isCameraActive?: boolean;
 }) {
   // Quadrant logic (normalized coords where (0,0) = top-left, (1,1) = bottom-right)
   // Drums requirement: left wrist in bottom-left (Q3): x < 0.5, y > 0.5
@@ -130,6 +136,28 @@ export default function CalibrationWizard({
   }, []);
 
   if (locked) return null;
+
+  // Show "Start Camera" prompt if camera is not active
+  if (!isCameraActive) {
+    return (
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-0 bg-gray-900/80 rounded-lg" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="text-center text-white px-6">
+            <VideoOff className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+            <h3 className="text-xl font-semibold mb-2">Camera Not Active</h3>
+            <p className="text-sm text-gray-300 mb-4">
+              Click "Start Camera" below to begin
+            </p>
+            <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
+              <Video className="w-4 h-4" />
+              <span>Camera access required for hand tracking</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // border: green only after the 3s hold (sequenceStarted), yellow when one good, red when none
   const borderClass = sequenceStarted
