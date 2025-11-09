@@ -102,20 +102,16 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
             // Helper function to convert normalized coordinates (0-1) to pixel coordinates
             // Coordinate system:
             // - MediaPipe: processes raw video, gives coordinates where x=0 is left side of raw video
-            // - Canvas buffer: raw (non-mirrored), getImageData() returns raw buffer
-            // - Canvas display: CSS-mirrored (scale-x-[-1]) - visually flipped
+            // - Canvas: we mirror the image when drawing, but draw overlays in normal coordinates
             // - Paper detection: works on raw buffer, coordinates in raw space
+            // - Overlays (keys, text, hands): drawn in normal coordinates (not mirrored)
             //
-            // Key insight: CSS mirroring flips the VISUAL display, not the canvas buffer
-            // - If we draw at x=100, CSS displays it at (width-100) visually
-            // - MediaPipe says finger at x=0.2*width (left in raw video)
-            // - User sees finger on left (because video is mirrored)
-            // - To draw circle on left: draw at flipped position x=0.8*width, CSS mirrors it back to 0.2*width
+            // Since we mirror the image when drawing, MediaPipe coordinates need to be flipped
+            // for display to match the mirrored image
             const toPixelCoords = (normalizedX: number, normalizedY: number) => {
-              // Flip X so that after CSS mirroring, it appears in the correct position
-              // MediaPipe raw x=0.2 (left) → draw at x=0.8 (right) → CSS mirrors to 0.2 (left) ✓
+              // Flip X to match the mirrored image display
               return {
-                x: Math.round((1 - normalizedX) * canvasWidth), // Flip X for CSS mirroring
+                x: Math.round((1 - normalizedX) * canvasWidth),
                 y: Math.round(normalizedY * canvasHeight),
               };
             };
@@ -129,6 +125,7 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
             // Z-depth threshold: MediaPipe Z is negative when closer to camera
             // When finger touches paper, Z should be close to paper plane
             const Z_TOUCH_THRESHOLD = -0.015; // Finger touching paper
+            const NUM_KEYS = 10; // Number of piano keys
 
             // Draw paper and key regions if detected
             const drawPaperPiano = () => {
@@ -163,21 +160,24 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
                 return;
               }
 
-              // Draw paper outline
-              // DON'T flip paper coordinates - CSS mirroring will handle it automatically
-              // This way paper and finger coordinates stay in sync (both in raw space)
+              // Draw paper outline (flip coordinates to match mirrored image)
               canvasCtx.strokeStyle = "#00FF00";
               canvasCtx.lineWidth = 3;
               canvasCtx.beginPath();
-              canvasCtx.moveTo(paperCorners.topLeft.x, paperCorners.topLeft.y);
-              canvasCtx.lineTo(paperCorners.topRight.x, paperCorners.topRight.y);
-              canvasCtx.lineTo(paperCorners.bottomRight.x, paperCorners.bottomRight.y);
-              canvasCtx.lineTo(paperCorners.bottomLeft.x, paperCorners.bottomLeft.y);
+              // Flip X coordinates for display
+              const topLeft = { x: canvasWidth - paperCorners.topRight.x, y: paperCorners.topLeft.y };
+              const topRight = { x: canvasWidth - paperCorners.topLeft.x, y: paperCorners.topRight.y };
+              const bottomRight = { x: canvasWidth - paperCorners.bottomLeft.x, y: paperCorners.bottomRight.y };
+              const bottomLeft = { x: canvasWidth - paperCorners.bottomRight.x, y: paperCorners.bottomLeft.y };
+              canvasCtx.moveTo(topLeft.x, topLeft.y);
+              canvasCtx.lineTo(topRight.x, topRight.y);
+              canvasCtx.lineTo(bottomRight.x, bottomRight.y);
+              canvasCtx.lineTo(bottomLeft.x, bottomLeft.y);
               canvasCtx.closePath();
               canvasCtx.stroke();
 
               // Draw corner markers
-              const corners = [paperCorners.topLeft, paperCorners.topRight, paperCorners.bottomRight, paperCorners.bottomLeft];
+              const corners = [topLeft, topRight, bottomRight, bottomLeft];
               corners.forEach((corner, i) => {
                 canvasCtx.fillStyle = "#00FF00";
                 canvasCtx.beginPath();
@@ -190,60 +190,72 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
               // - Black keys placed above gaps (skipped above E and B)
               // - Pressed keys show a depressed shading and brighter highlight
               const noteNames = ["C", "D", "E", "F", "G", "A", "B", "C", "D", "E"];
-
-              // First draw all white keys (base layer)
+              
+              // Since we mirror the image when drawing, key regions need to be drawn mirrored
+              // keyRegions[0] (raw left) appears on visual right after image mirroring
+              // So we reverse the note index mapping to match visual layout
               keyRegions.forEach((keyRegion, i) => {
-                const isPressed = Array.from(activeKeysRef.current.values()).includes(keyRegion.noteIndex);
+                // Reverse note index for display to match mirrored image
+                const visualKeyIndex = NUM_KEYS - 1 - keyRegion.noteIndex;
+                const isPressed = Array.from(activeKeysRef.current.values()).includes(visualKeyIndex);
+                
+                // Flip key region coordinates for display (to match mirrored image)
+                const flippedX = canvasWidth - (keyRegion.x + keyRegion.width);
+                const flippedY = keyRegion.y;
 
-                // White key background
+                // White key background (flipped coordinates)
                 canvasCtx.fillStyle = isPressed ? "#FFF7D6" : "#FFFFFF"; // slight warm tint when pressed
-                canvasCtx.fillRect(keyRegion.x, keyRegion.y, keyRegion.width, keyRegion.height);
+                canvasCtx.fillRect(flippedX, flippedY, keyRegion.width, keyRegion.height);
 
                 // Key top highlight (subtle) to give a beveled look
-                const grad = canvasCtx.createLinearGradient(keyRegion.x, keyRegion.y, keyRegion.x, keyRegion.y + keyRegion.height);
+                const grad = canvasCtx.createLinearGradient(flippedX, flippedY, flippedX, flippedY + keyRegion.height);
                 grad.addColorStop(0, isPressed ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.35)");
                 grad.addColorStop(1, "rgba(200,200,200,0.03)");
                 canvasCtx.fillStyle = grad;
-                canvasCtx.fillRect(keyRegion.x, keyRegion.y, keyRegion.width, Math.max(6, keyRegion.height * 0.12));
+                canvasCtx.fillRect(flippedX, flippedY, keyRegion.width, Math.max(6, keyRegion.height * 0.12));
 
                 // Key border / separator lines
                 canvasCtx.strokeStyle = "#333";
                 canvasCtx.lineWidth = 1;
                 canvasCtx.beginPath();
                 // Left edge
-                canvasCtx.moveTo(keyRegion.x, keyRegion.y);
-                canvasCtx.lineTo(keyRegion.x, keyRegion.y + keyRegion.height);
+                canvasCtx.moveTo(flippedX, flippedY);
+                canvasCtx.lineTo(flippedX, flippedY + keyRegion.height);
                 // Right edge
-                canvasCtx.moveTo(keyRegion.x + keyRegion.width, keyRegion.y);
-                canvasCtx.lineTo(keyRegion.x + keyRegion.width, keyRegion.y + keyRegion.height);
+                canvasCtx.moveTo(flippedX + keyRegion.width, flippedY);
+                canvasCtx.lineTo(flippedX + keyRegion.width, flippedY + keyRegion.height);
                 canvasCtx.stroke();
 
                 // If pressed, draw a shadow to simulate depressed key
                 if (isPressed) {
                   canvasCtx.fillStyle = "rgba(0,0,0,0.08)";
-                  canvasCtx.fillRect(keyRegion.x + 2, keyRegion.y + keyRegion.height * 0.55, keyRegion.width - 4, keyRegion.height * 0.45);
+                  canvasCtx.fillRect(flippedX + 2, flippedY + keyRegion.height * 0.55, keyRegion.width - 4, keyRegion.height * 0.45);
                 }
 
-                // Draw note label at bottom-center of key
+                // Draw note label at bottom-center of key (text not mirrored, reads correctly)
                 canvasCtx.fillStyle = "#000000";
                 canvasCtx.font = "bold 14px Arial";
                 canvasCtx.textAlign = "center";
-                canvasCtx.fillText(noteNames[i], keyRegion.x + keyRegion.width / 2, keyRegion.y + keyRegion.height - 10);
+                canvasCtx.fillText(noteNames[visualKeyIndex], flippedX + keyRegion.width / 2, flippedY + keyRegion.height - 10);
               });
 
               // Then draw black keys on top where appropriate
               // Black keys sit between white keys except after E and B
-              for (let i = 0; i < keyRegions.length - 1; i++) {
-                const left = keyRegions[i];
-                const right = keyRegions[i + 1];
-                const note = noteNames[i];
+              // Note: Iterate in reverse to match the visual key order after mirroring
+              for (let i = keyRegions.length - 2; i >= 0; i--) {
+                const left = keyRegions[i + 1]; // Note: swapped due to reverse iteration
+                const right = keyRegions[i];
+                // Use visual note index
+                const visualNoteIndex = NUM_KEYS - 1 - i;
+                const note = noteNames[visualNoteIndex];
                 // No black key after E or B
                 if (note === "E" || note === "B") continue;
 
-                // Position black key slightly to the right of the left white key's center
+                // Position black key (flip coordinates to match mirrored image)
                 const blackWidth = Math.round(Math.min(left.width, right.width) * 0.6);
                 const blackHeight = Math.round(left.height * 0.62);
-                const blackX = Math.round(left.x + left.width * 0.66);
+                const flippedLeftX = canvasWidth - (left.x + left.width);
+                const blackX = Math.round(flippedLeftX + left.width * 0.34); // Adjusted for flipped coordinates
                 const blackY = left.y;
 
                 // See if the black key is currently pressed by checking if any active key maps to the right adjacent white key
@@ -264,7 +276,7 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
               // Draw a subtle paper border on top of keys to keep the look cohesive
               canvasCtx.strokeStyle = "rgba(100,100,100,0.4)";
               canvasCtx.lineWidth = 2;
-              canvasCtx.strokeRect(paperCorners.topLeft.x, paperCorners.topLeft.y, paperCorners.topRight.x - paperCorners.topLeft.x, paperCorners.bottomLeft.y - paperCorners.topLeft.y);
+              canvasCtx.strokeRect(topLeft.x, topLeft.y, topRight.x - topLeft.x, bottomLeft.y - topLeft.y);
             };
 
             // Process hand detection and piano key presses (only when paper is detected)
@@ -277,21 +289,24 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
                   const indexTipLandmark = landmarks[8];
                   const indexTipZ = indexTipLandmark.z || 0; // Z depth: negative = closer to camera
                   
-                  // COORDINATE SYSTEM (FIXED):
+                  // COORDINATE SYSTEM:
                   // - MediaPipe processes RAW video: coordinates in raw space (x=0 = left in raw video)
-                  // - Canvas is CSS-mirrored: everything drawn is automatically mirrored visually
+                  // - Canvas image is mirrored when drawn (so user sees mirrored view)
                   // - Paper detection works on raw buffer: coordinates in raw space
-                  // - Paper is drawn in RAW coordinates: CSS mirroring handles the visual flip
+                  // - Overlays (keys, text, hands) are drawn in normal (flipped) coordinates to match mirrored image
                   //
-                  // Solution: Use RAW coordinates for both detection and drawing
-                  // CSS mirroring will flip both paper and finger visually, so they stay aligned
+                  // For detection: use raw coordinates (both paper and finger are in raw space)
                   const rawFingerX = indexTipLandmark.x * canvasWidth;
                   const rawFingerY = indexTipLandmark.y * canvasHeight;
                   
-                  // Get which key the finger is pointing at (using raw coordinates - both paper and finger are in raw space)
-                  const keyIndex = paperDetectorRef.current!.getKeyAtPosition(rawFingerX, rawFingerY);
+                  // Get which key the finger is pointing at (using raw coordinates)
+                  const rawKeyIndex = paperDetectorRef.current!.getKeyAtPosition(rawFingerX, rawFingerY);
                   
-                  // For display, flip coordinates so it matches the mirrored video
+                  // Since we mirror the image, we need to reverse the key index for display/playback
+                  // Raw key 0 (left) appears on visual right after mirroring
+                  const keyIndex = rawKeyIndex !== null ? NUM_KEYS - 1 - rawKeyIndex : null;
+                  
+                  // For display, flip coordinates to match the mirrored image
                   const indexTip = toPixelCoords(indexTipLandmark.x, indexTipLandmark.y);
                   
                   // Debug: log finger position and key detection (less verbose)
@@ -405,6 +420,12 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
               canvasRef.current.width,
               canvasRef.current.height
             );
+            
+            // Mirror the camera image (like air-drums) so the view feels natural
+            // This way text and overlays remain readable (not mirrored)
+            canvasCtx.save();
+            canvasCtx.translate(canvasRef.current.width, 0);
+            canvasCtx.scale(-1, 1);
             canvasCtx.drawImage(
               results.image,
               0,
@@ -412,6 +433,7 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
               canvasRef.current.width,
               canvasRef.current.height
             );
+            canvasCtx.restore();
 
             // Try automatic paper detection periodically (every 60 frames = ~2 seconds at 30fps)
             // Edge detection is expensive, so run less frequently
@@ -465,7 +487,9 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
                 let isClose = false;
                 if (paperDetectorRef.current?.isDetected()) {
                   // Use raw coordinates for detection
-                  keyIndex = paperDetectorRef.current.getKeyAtPosition(indexTip.x, indexTip.y);
+                  const rawKeyIndex = paperDetectorRef.current.getKeyAtPosition(indexTip.x, indexTip.y);
+                  // Mirror the key index to match visual layout
+                  keyIndex = rawKeyIndex !== null ? NUM_KEYS - 1 - rawKeyIndex : null;
                   isClose = indexTipZ < Z_TOUCH_THRESHOLD;
                 }
                 
@@ -481,15 +505,20 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
                 // Draw line from finger to hitbox circle if over paper (like reference project)
                 if (keyIndex !== null && paperDetectorRef.current?.isDetected()) {
                   const keyRegions = paperDetectorRef.current.getKeyRegions();
-                  const keyRegion = keyRegions[keyIndex];
+                  // Use raw key index to get the correct key region position (keyIndex is visual, need raw)
+                  const rawKeyIndex = NUM_KEYS - 1 - keyIndex;
+                  const keyRegion = keyRegions[rawKeyIndex];
                   
-                  // Draw line from finger to hitbox center (both in raw coordinates)
+                  // Flip hitbox center coordinates to match mirrored image
+                  const flippedHitboxX = canvasWidth - keyRegion.hitboxCenterX;
+                  
+                  // Draw line from finger to hitbox center (finger already flipped, hitbox now flipped)
                   canvasCtx.strokeStyle = isClose ? "rgba(0, 255, 0, 0.8)" : "rgba(255, 255, 255, 0.3)";
                   canvasCtx.lineWidth = isClose ? 3 : 2;
                   canvasCtx.setLineDash(isClose ? [] : [5, 5]);
                   canvasCtx.beginPath();
                   canvasCtx.moveTo(indexTip.x, indexTip.y);
-                  canvasCtx.lineTo(keyRegion.hitboxCenterX, keyRegion.hitboxCenterY);
+                  canvasCtx.lineTo(flippedHitboxX, keyRegion.hitboxCenterY);
                   canvasCtx.stroke();
                   canvasCtx.setLineDash([]);
                 }
@@ -716,7 +745,7 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
           />
           <canvas
             ref={canvasRef}
-            className="w-full h-auto transform scale-x-[-1]"
+            className="w-full h-auto"
             width={640}
             height={480}
             style={{ background: "black" }}

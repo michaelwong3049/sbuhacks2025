@@ -1,78 +1,39 @@
-# 🎵 Airstrument – Turn Your Movement Into Music
-
 ## Inspiration
+Playing music usually means owning instruments and having space to use them. We wanted to make music creation as accessible as possible — no gear, no setup, just motion. With Airstrument, anyone can play music anywhere using only their hands and a webcam.
 
-Music creation is deeply human — but playing an instrument requires physical access, space, and equipment.
+## What it does
+Airstrument turns your webcam into a motion-controlled instrument. It tracks your hands in real time and maps gestures to musical sounds — like air drums you can actually play.
+- Air Drums: Strike down for snares and kicks, swipe sideways for cymbals
+- Tracking: Uses MediaPipe Hands to detect 21 landmarks per hand at 30+ FPS
+- Motion detection: Calculates direction and speed to distinguish hits from casual movement
+- Visual feedback: Shows hit zones and animations for clear timing
+- Multiplayer: WebRTC peer-to-peer lets multiple users jam together live
 
-We asked: **what if anyone could play music anywhere, using nothing but their hands and a webcam?**
+## How we built it
+- Frontend: React + Next.js + Tailwind CSS
+- Vision layer: MediaPipe Hands (CDN-based), with custom coordinate transforms for mirrored video
+- Audio engine: Tone.js with FM synthesis for realistic drums
+- Motion logic: Velocity- and direction-based hit detection, with dual cooldowns to prevent false triggers
+- Multiplayer: WebRTC peer connections to sync sound events across browsers
 
-Airstrument transforms your webcam into an intelligent motion-tracking stage, letting you play virtual instruments in midair — no hardware required.
+## Challenges we ran into
+- Aligning coordinate systems between MediaPipe (normalized) and the canvas (pixels)
+- Filtering out noise from hand movement without breaking responsiveness
+- Handling module imports and browser compatibility for MediaPipe
+- Tuning velocity thresholds to feel natural for different users
 
-## What It Does
+## Accomplishments
+- Built a working air drums prototype with <100 ms latency
+- Designed a modular system for adding new instruments
+- Created stable real-time motion tracking entirely in the browser
+- Added synchronized multiplayer jamming via WebRTC
+- What we learned
+- Real-time gesture-to-sound requires tight optimization — every frame counts
+- Edge detection and cooldown logic are key for reliable motion input
+- Browser-based ML (MediaPipe + WebGL) is powerful enough for responsive music performance
 
-Airstrument uses real-time pose tracking and motion analysis to detect hand movements, interpret them as musical actions, and generate authentic instrument sounds.
-
-You can choose an instrument (like drums or guitar), position yourself as guided by the UI, and then start performing.
-
-When you strum, hit, or move your hands, the app detects your motion zones and velocities — and plays the corresponding notes or beats instantly.
-
-## How We Built It
-
-- **Frontend:** React + Tailwind + Tone.js for the interface and sound engine
-- **Vision Layer:** MediaPipe Pose for real-time hand, wrist, and body tracking directly in the browser (WebGL)
-- **Logic Layer:** Custom motion detection algorithms analyze wrist velocity, direction, and position to detect hits and strums
-- **Backend (optional):** Node.js WebSocket server for real-time event streaming and multiplayer visualization
-
-## Challenges We Ran Into
-
-- Translating noisy 3D pose data into consistent, playable actions
-- Managing latency between camera input and sound playback
-- Designing intuitive calibration so players naturally align their "air instruments" with the screen
-
-## Accomplishments That We're Proud Of
-
-- Built a fully playable air drum and air guitar prototype in less than 24 hours
-- Achieved <100ms motion-to-sound latency using local pose processing
-- Designed a modular system where new instruments can be added with custom zone maps and sounds
-- Created a simple yet magical experience that lets anyone play music through movement
-
-## What We Learned
-
-Combining computer vision and sound synthesis demands real-time precision and user-friendly calibration.
-
-MediaPipe's hand and body tracking opened new creative possibilities, and optimizing motion thresholds was key to making performance feel natural.
-
-## What's Next for Airstrument
-
-- Add multiplayer "jam sessions" via WebRTC
-- Expand instrument library (piano, violin, DJ pads)
-- Integrate gesture-based recording and looping
-- Launch as an open-source toolkit for creative coders, educators, and accessibility-focused musicians
-
-## Tagline
-
-🎵 **Airstrument — turn your movement into music.**
-
----
-
-## Project Structure
-
-See `TEAM_ASSIGNMENTS.md` for detailed folder structure and team member responsibilities.
-
-## Getting Started
-
-```bash
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) to see the app.
-
-## Tech Stack
-
-- **Framework:** Next.js 16
-- **UI:** React 19 + Tailwind CSS
-- **Vision:** MediaPipe Hands/Pose
-- **Audio:** Tone.js
-- **Language:** TypeScript
-- **Backend (optional):** Node.js + WebSocket
+## What’s next
+- Add more instruments (piano, tambourine, triangle)
+- Improve multiplayer with real-time hand visualization
+- Add gesture-based recording and looping
+- Open-source the framework for creative coders and accessibility projects
