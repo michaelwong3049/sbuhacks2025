@@ -11,7 +11,11 @@ type HandsType = {
   close: () => Promise<void>;
 };
 
-export default function Home() {
+interface PianoPlayerProps {
+  onNotePlayed?: (noteName: string, keyIndex: number) => void;
+}
+
+export default function PianoPlayer({ onNotePlayed }: PianoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [handPositions, setHandPositions] = useState<{
@@ -310,6 +314,11 @@ export default function Home() {
                       const noteName = pianoRef.current.getNotes()[keyIndex];
                       console.log(`🎹 ✅ TRIGGER: Playing key ${keyIndex} (${noteName}) - Z=${indexTipZ.toFixed(3)}`);
                       pianoRef.current.playNote(keyIndex);
+                      
+                      // Call the callback if provided
+                      if (onNotePlayed) {
+                        onNotePlayed(noteName, keyIndex);
+                      }
                     } else {
                       console.error("❌ Piano ref is null!");
                     }

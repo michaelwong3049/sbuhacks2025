@@ -48,9 +48,9 @@ function drawConnections(ctx: CanvasRenderingContext2D, landmarks: any[], connec
     const start = landmarks[connection[0]];
     const end = landmarks[connection[1]];
     // Mirror X when drawing so overlays align with the mirrored camera image
-    const startX = ctx.canvas.width - (start.x * ctx.canvas.width);
+    const startX = ctx.canvas.width - start.x * ctx.canvas.width;
     const startY = start.y * ctx.canvas.height;
-    const endX = ctx.canvas.width - (end.x * ctx.canvas.width);
+    const endX = ctx.canvas.width - end.x * ctx.canvas.width;
     const endY = end.y * ctx.canvas.height;
     ctx.moveTo(startX, startY);
     ctx.lineTo(endX, endY);
@@ -62,7 +62,7 @@ function drawLandmarks(ctx: CanvasRenderingContext2D, landmarks: any[], style: {
   ctx.fillStyle = style.color;
   for (const landmark of landmarks) {
     // Mirror X so landmarks align with mirrored camera image
-    const x = ctx.canvas.width - (landmark.x * ctx.canvas.width);
+    const x = ctx.canvas.width - landmark.x * ctx.canvas.width;
     const y = landmark.y * ctx.canvas.height;
     ctx.beginPath();
     ctx.arc(x, y, 3, 0, 2 * Math.PI);
