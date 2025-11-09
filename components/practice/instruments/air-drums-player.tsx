@@ -272,6 +272,7 @@ export default function AirDrumsPlayer({ peerManager = null }: AirDrumsPlayerPro
                   const prevSpeed = prevVerticalSpeedRef.current.get(handIndex) || 0;
 
                   // Side snares require downward + horizontal motion towards the drum
+                  // Left snare
                   if (
                     distLeft < drumRadius &&
                     dy > MIN_DY_PIXELS &&
@@ -284,35 +285,36 @@ export default function AirDrumsPlayer({ peerManager = null }: AirDrumsPlayerPro
                         registerHit("left", () => drumKitRef.current!.playSnare(), 'snare');
                       }
                     }
+                  }
 
-                    if (
-                      distRight < drumRadius &&
-                      dy > MIN_DY_PIXELS &&
-                      verticalSpeed > VELOCITY_THRESHOLD &&
-                      prevSpeed <= VELOCITY_THRESHOLD
-                    ) {
-                      // moving towards right drum means horizontalSpeed is positive (rightward)
-                      if (horizontalSpeed > HORIZ_SPEED_THRESHOLD) {
-                        if (drumKitRef.current) {
-                          registerHit("right", () =>
-                            drumKitRef.current!.playSnare(), 'snare'
-                          );
-                        }
-                      }
-                    }
-
-                    // Bass (kick) at bottom: only downward movement needed
-                    if (
-                      distBass < bassRadius &&
-                      dy > MIN_DY_PIXELS &&
-                      verticalSpeed > VELOCITY_THRESHOLD &&
-                      prevSpeed <= VELOCITY_THRESHOLD
-                    ) {
+                  // Right snare
+                  if (
+                    distRight < drumRadius &&
+                    dy > MIN_DY_PIXELS &&
+                    verticalSpeed > VELOCITY_THRESHOLD &&
+                    prevSpeed <= VELOCITY_THRESHOLD
+                  ) {
+                    // moving towards right drum means horizontalSpeed is positive (rightward)
+                    if (horizontalSpeed > HORIZ_SPEED_THRESHOLD) {
                       if (drumKitRef.current) {
-                        registerHit("bass", () =>
-                          drumKitRef.current!.playKick(), 'kick'
+                        registerHit("right", () =>
+                          drumKitRef.current!.playSnare(), 'snare'
                         );
                       }
+                    }
+                  }
+
+                  // Bass (kick) at bottom: only downward movement needed
+                  if (
+                    distBass < bassRadius &&
+                    dy > MIN_DY_PIXELS &&
+                    verticalSpeed > VELOCITY_THRESHOLD &&
+                    prevSpeed <= VELOCITY_THRESHOLD
+                  ) {
+                    if (drumKitRef.current) {
+                      registerHit("bass", () =>
+                        drumKitRef.current!.playKick(), 'kick'
+                      );
                     }
                   }
 
