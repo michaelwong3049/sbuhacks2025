@@ -20,20 +20,61 @@ export class Piano {
   // C4..E5
   private readonly notes = ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5"];
 
-  constructor() {}
-
-  private async initToneFallback() {
-    // Initialize a small layered Tone.js piano as a fallback
-    await Tone.start();
-    this.fallbackStrings = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: "sine" },
-      envelope: { attack: 0.002, decay: 1.6, sustain: 0.06, release: 1.2 },
-      volume: -6,
-    }).toDestination();
-
-    this.fallbackHammer = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.0006, decay: 0.05, sustain: 0 }, volume: -8 }).toDestination();
-    this.toneFallback = true;
-    console.log("🎹 Piano: using Tone.js fallback synth");
+  constructor() {
+    // Create a realistic piano sound using FMSynth with multiple effects
+    // This configuration mimics the attack, decay, and harmonics of a real piano
+    
+    this.synth = new Tone.PolySynth({
+      maxPolyphony: 10,
+      voice: Tone.FMSynth,
+      options: {
+        harmonicity: 2.5, // Creates rich harmonics
+        modulationIndex: 12, // More complex, piano-like tone
+        oscillator: {
+          type: "sine", // Carrier wave
+        },
+        envelope: {
+          attack: 0.005, // Very quick attack (piano hammers hit fast)
+          decay: 0.25, // Gradual decay like a real piano
+          sustain: 0.08, // Low sustain (piano notes decay naturally)
+          release: 0.5, // Natural release
+        },
+        modulation: {
+          type: "square", // Modulator for richer harmonics
+        },
+        modulationEnvelope: {
+          attack: 0.008,
+          decay: 0.2,
+          sustain: 0.15,
+          release: 0.35,
+        },
+      },
+    });
+    
+    // Add compressor for more natural dynamics
+    this.compressor = new Tone.Compressor({
+      threshold: -24,
+      ratio: 4,
+      attack: 0.003,
+      release: 0.1,
+    });
+    
+    // Add low-pass filter to warm up the sound and remove harsh frequencies
+    this.filter = new Tone.Filter({
+      type: "lowpass",
+      frequency: 2800, // Cut harsh high frequencies
+      Q: 0.8, // Gentle rolloff
+    });
+    
+    // Add reverb for realistic room sound
+    // Tone.js Reverb constructor takes decay time in seconds
+    this.reverb = new Tone.Reverb(0.5); // 0.5 second decay for spacious sound
+    
+    // Connect: synth -> compressor -> filter -> reverb -> destination
+    this.synth.connect(this.compressor);
+    this.compressor.connect(this.filter);
+    this.filter.connect(this.reverb);
+    this.reverb.toDestination();
   }
 
   async initialize() {

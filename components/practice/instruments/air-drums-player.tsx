@@ -2,13 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { DrumKit } from "@/app/lib/sound/drum-kit";
-import CalibrationWizard from "@/app/components/calibration/CalibrationWizard";
+import CalibrationWizard from "@/components/calibration/CalibrationWizard";
 import { Hands } from "@mediapipe/hands";
 
 type HandsType = {
   setOptions: (options: any) => void;
   onResults: (callback: (results: any) => void) => void;
-  send: (data: { image: HTMLVideoElement | HTMLCanvasElement }) => Promise<void>;
+  send: (data: {
+    image: HTMLVideoElement | HTMLCanvasElement;
+  }) => Promise<void>;
   close: () => Promise<void>;
 };
 
@@ -28,16 +30,21 @@ export default function Home() {
   // Lower default a bit to make zones easier to hit.
   const [velocityThreshold, setVelocityThreshold] = useState<number>(1500);
   const [handSpeeds, setHandSpeeds] = useState<Record<number, number>>({});
-  
+
   // Store previous hand positions for velocity calculation
   // Store both index finger and thumb positions (like holding a drumstick)
-  const previousPositionsRef = useRef<Map<number, { 
-    indexX: number; 
-    indexY: number; 
-    thumbX: number; 
-    thumbY: number; 
-    timestamp: number 
-  }>>(new Map());
+  const previousPositionsRef = useRef<
+    Map<
+      number,
+      {
+        indexX: number;
+        indexY: number;
+        thumbX: number;
+        thumbY: number;
+        timestamp: number;
+      }
+    >
+  >(new Map());
   const lastTriggerRef = useRef<Map<number, number>>(new Map());
   // Per-drum cooldowns keyed by 'left'|'right' to reduce double-triggering on the same visual drum
   const drumLastTriggerRef = useRef<Map<string, number>>(new Map());
@@ -57,8 +64,8 @@ export default function Home() {
   useEffect(() => {
     if (!videoRef.current || !canvasRef.current) return;
 
-  // Initialize drum kit for sound playback
-  drumKitRef.current = new DrumKit();
+    // Initialize drum kit for sound playback
+    drumKitRef.current = new DrumKit();
 
   // Preload optional drum images from /assets (public folder)
   const loadImg = (path: string) => {
@@ -126,7 +133,10 @@ export default function Home() {
             const canvasHeight = canvasRef.current.height;
 
             // Helper function to convert normalized coordinates (0-1) to pixel coordinates
-            const toPixelCoords = (normalizedX: number, normalizedY: number) => {
+            const toPixelCoords = (
+              normalizedX: number,
+              normalizedY: number
+            ) => {
               // Keep X flipped for the mirrored video (visual left/right), but
               // do NOT flip Y — MediaPipe's normalized Y already increases downward
               // which matches canvas coordinates (0 at top). Flipping Y caused
@@ -149,8 +159,8 @@ export default function Home() {
             // - 1600: medium fast gestures
             // - 3000-5000: fast, deliberate strikes
             // - >5000: very aggressive gestures only
-              // Trigger on high downward finger velocity. The threshold is adjustable at runtime.
-              const VELOCITY_THRESHOLD = velocityThreshold; // px/s (adjustable via UI)
+            // Trigger on high downward finger velocity. The threshold is adjustable at runtime.
+            const VELOCITY_THRESHOLD = velocityThreshold; // px/s (adjustable via UI)
             const COOLDOWN_MS = 100; // per-hand cooldown (ms)
             const DRUM_COOLDOWN_MS = 350; // per-drum cooldown to reduce double hits on same visual drum (tuned up)
 
@@ -250,33 +260,36 @@ export default function Home() {
                         registerHit("left", () => drumKitRef.current!.playSnare());
                       }
                     }
-                  }
 
-                  if (
-                    distRight < drumRadius &&
-                    dy > MIN_DY_PIXELS &&
-                    verticalSpeed > VELOCITY_THRESHOLD &&
-                    prevSpeed <= VELOCITY_THRESHOLD
-                  ) {
-                    // moving towards right drum means horizontalSpeed is positive (rightward)
-                    if (horizontalSpeed > HORIZ_SPEED_THRESHOLD) {
-                      if (drumKitRef.current) {
-                        registerHit("right", () => drumKitRef.current!.playSnare());
+                    if (
+                      distRight < drumRadius &&
+                      dy > MIN_DY_PIXELS &&
+                      verticalSpeed > VELOCITY_THRESHOLD &&
+                      prevSpeed <= VELOCITY_THRESHOLD
+                    ) {
+                      // moving towards right drum means horizontalSpeed is positive (rightward)
+                      if (horizontalSpeed > HORIZ_SPEED_THRESHOLD) {
+                        if (drumKitRef.current) {
+                          registerHit("right", () =>
+                            drumKitRef.current!.playSnare()
+                          );
+                        }
                       }
                     }
-                  }
 
-                  // Bass (kick) at bottom: only downward movement needed
-                  if (
-                    distBass < bassRadius &&
-                    dy > MIN_DY_PIXELS &&
-                    verticalSpeed > VELOCITY_THRESHOLD &&
-                    prevSpeed <= VELOCITY_THRESHOLD
-                  ) {
-                    if (drumKitRef.current) {
-                      registerHit("bass", () => drumKitRef.current!.playKick());
+                    // Bass (kick) at bottom: only downward movement needed
+                    if (
+                      distBass < bassRadius &&
+                      dy > MIN_DY_PIXELS &&
+                      verticalSpeed > VELOCITY_THRESHOLD &&
+                      prevSpeed <= VELOCITY_THRESHOLD
+                    ) {
+                      if (drumKitRef.current) {
+                        registerHit("bass", () =>
+                          drumKitRef.current!.playKick()
+                        );
+                      }
                     }
-                  }
 
 
                   // Hi-hat: right-side zone, triggered by a rightward horizontal
@@ -292,6 +305,9 @@ export default function Home() {
                     if (drumKitRef.current) {
                       registerHit("hihat", () => drumKitRef.current!.playHiHat());
                     }
+
+                    // store current vertical speed for next-frame edge detection
+                    prevVerticalSpeedRef.current.set(handIndex, verticalSpeed);
                   }
 
                   // Crash: left-side mid zone, triggered by leftward horizontal motion
@@ -310,17 +326,7 @@ export default function Home() {
                   prevVerticalSpeedRef.current.set(handIndex, verticalSpeed);
                   prevHorizontalSpeedRef.current.set(handIndex, horizontalSpeed);
                 }
-
-                // Update previous position (store index & thumb to preserve existing data shape)
-                const thumbTip = toPixelCoords(landmarks[4].x, landmarks[4].y);
-                previousPositionsRef.current.set(handIndex, {
-                  indexX: indexTip.x,
-                  indexY: indexTip.y,
-                  thumbX: thumbTip.x,
-                  thumbY: thumbTip.y,
-                  timestamp: currentTime,
-                });
-              });
+              );
             }
 
             canvasCtx.save();
@@ -349,7 +355,13 @@ export default function Home() {
             // Draw drum visuals near the bottom of the camera view so the
             // user has a visual target. These are stylized drawn drums (no
             // external image assets required).
-            const drawDrum = (x: number, y: number, radius: number, label: string, fillColor: string) => {
+            const drawDrum = (
+              x: number,
+              y: number,
+              radius: number,
+              label: string,
+              fillColor: string
+            ) => {
               // rim
               canvasCtx.beginPath();
               canvasCtx.arc(x, y, radius + 8, 0, Math.PI * 2);
@@ -357,7 +369,14 @@ export default function Home() {
               canvasCtx.fill();
 
               // drum body (radial gradient)
-              const grad = canvasCtx.createRadialGradient(x - radius*0.3, y - radius*0.4, radius*0.1, x, y, radius);
+              const grad = canvasCtx.createRadialGradient(
+                x - radius * 0.3,
+                y - radius * 0.4,
+                radius * 0.1,
+                x,
+                y,
+                radius
+              );
               grad.addColorStop(0, fillColor);
               grad.addColorStop(1, "#222");
               canvasCtx.beginPath();
@@ -367,25 +386,42 @@ export default function Home() {
 
               // center highlight
               canvasCtx.beginPath();
-              canvasCtx.arc(x, y - radius*0.15, radius*0.25, 0, Math.PI * 2);
+              canvasCtx.arc(
+                x,
+                y - radius * 0.15,
+                radius * 0.25,
+                0,
+                Math.PI * 2
+              );
               canvasCtx.fillStyle = "rgba(255,255,255,0.06)";
               canvasCtx.fill();
 
               // label
               canvasCtx.fillStyle = "#fff";
-              canvasCtx.font = `${Math.max(12, Math.round(radius * 0.35))}px Arial`;
+              canvasCtx.font = `${Math.max(
+                12,
+                Math.round(radius * 0.35)
+              )}px Arial`;
               canvasCtx.textAlign = "center";
               canvasCtx.fillText(label, x, y + radius + 18);
             };
 
             // Provide visual flash when a drum was recently hit
-            const flashLeft = (hitFlashRef.current.get("left") || 0);
-            const flashRight = (hitFlashRef.current.get("right") || 0);
-            const flashBass = (hitFlashRef.current.get("bass") || 0);
-            const flashHiHat = (hitFlashRef.current.get("hihat") || 0);
+            const flashLeft = hitFlashRef.current.get("left") || 0;
+            const flashRight = hitFlashRef.current.get("right") || 0;
+            const flashBass = hitFlashRef.current.get("bass") || 0;
+            const flashHiHat = hitFlashRef.current.get("hihat") || 0;
             const FLASH_DURATION = 180; // ms
 
-            const drawDrumWithFlash = (id: string, x: number, y: number, radius: number, label: string, fillColor: string, emoji?: string) => {
+            const drawDrumWithFlash = (
+              id: string,
+              x: number,
+              y: number,
+              radius: number,
+              label: string,
+              fillColor: string,
+              emoji?: string
+            ) => {
               const flashAge = currentTime - (hitFlashRef.current.get(id) || 0);
               if (flashAge <= FLASH_DURATION) {
                 const alpha = 1 - flashAge / FLASH_DURATION;
@@ -416,8 +452,24 @@ export default function Home() {
             };
 
             // Draw left/right snares
-            drawDrumWithFlash("left", leftDrumX, drumY, drumRadius, "🥁 Snare (L)", "#4ECDC4", "🥁");
-            drawDrumWithFlash("right", rightDrumX, drumY, drumRadius, "🥁 Snare (R)", "#FF6B6B", "🥁");
+            drawDrumWithFlash(
+              "left",
+              leftDrumX,
+              drumY,
+              drumRadius,
+              "🥁 Snare (L)",
+              "#4ECDC4",
+              "🥁"
+            );
+            drawDrumWithFlash(
+              "right",
+              rightDrumX,
+              drumY,
+              drumRadius,
+              "🥁 Snare (R)",
+              "#FF6B6B",
+              "🥁"
+            );
 
             // Draw crash cymbal on mid-left
             const crashX = canvasWidth * 0.15;
@@ -429,7 +481,15 @@ export default function Home() {
             const bassX = canvasWidth * 0.5;
             const bassY = canvasHeight * 0.88;
             const bassRadius = Math.min(canvasWidth, canvasHeight) * 0.18;
-            drawDrumWithFlash("bass", bassX, bassY, bassRadius, "🔘 Bass", "#222222", "🔊");
+            drawDrumWithFlash(
+              "bass",
+              bassX,
+              bassY,
+              bassRadius,
+              "🔘 Bass",
+              "#222222",
+              "🔊"
+            );
 
             // Draw hi-hat at middle-right (match detection zone)
             const hiHatX = canvasWidth * 0.85;
@@ -459,7 +519,8 @@ export default function Home() {
               if (results.multiHandLandmarks && results.multiHandedness) {
                 for (let i = 0; i < results.multiHandLandmarks.length; i++) {
                   const landmarks = results.multiHandLandmarks[i];
-                  const handednessLabel = results.multiHandedness[i]?.label || "";
+                  const handednessLabel =
+                    results.multiHandedness[i]?.label || "";
                   // MediaPipe: landmark 0 is wrist; x,y are normalized [0..1]
                   const wrist = landmarks[0];
                   // The canvas/video element is mirrored via CSS (scale-x-[-1]) so
@@ -479,7 +540,10 @@ export default function Home() {
               }
             } catch (err) {
               // swallow any parsing errors
-              console.warn("Error parsing hand landmarks for calibration:", err);
+              console.warn(
+                "Error parsing hand landmarks for calibration:",
+                err
+              );
             }
 
             // Update React state used by calibration UI
@@ -575,7 +639,9 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Error starting camera:", error);
-      alert("Failed to access camera. Please ensure you have granted camera permissions.");
+      alert(
+        "Failed to access camera. Please ensure you have granted camera permissions."
+      );
     }
   };
 
@@ -597,7 +663,9 @@ export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex min-h-screen w-full max-w-4xl flex-col items-center justify-center gap-8 py-16 px-8">
-        <h1 className="text-4xl font-bold text-black dark:text-zinc-50">🥁 Air Drums</h1>
+        <h1 className="text-4xl font-bold text-black dark:text-zinc-50">
+          🥁 Air Drums
+        </h1>
         <p className="text-lg text-gray-600 dark:text-gray-400">
           Move your hands quickly downward into the snare zones to play sounds
         </p>
@@ -618,7 +686,10 @@ export default function Home() {
           />
           {/* Drums-only calibration overlay */}
           <div className="absolute inset-0 pointer-events-none">
-            <CalibrationWizard handPositions={handPositions} isCameraActive={isActive} />
+            <CalibrationWizard
+              handPositions={handPositions}
+              isCameraActive={isActive}
+            />
           </div>
         </div>
 
@@ -642,7 +713,9 @@ export default function Home() {
 
         {/* Runtime tuning UI: threshold slider and per-hand speed readout */}
         <div className="w-full max-w-2xl flex flex-col gap-2 mt-4">
-          <label className="text-sm text-gray-600 dark:text-gray-300">Velocity threshold: {Math.round(velocityThreshold)} px/s</label>
+          <label className="text-sm text-gray-600 dark:text-gray-300">
+            Velocity threshold: {Math.round(velocityThreshold)} px/s
+          </label>
           <input
             type="range"
             min={500}
@@ -655,10 +728,15 @@ export default function Home() {
 
           <div className="flex gap-4 mt-2 text-sm text-gray-700 dark:text-gray-300">
             {Object.keys(handSpeeds).length === 0 ? (
-              <div className="text-xs">Hand speeds will appear here while the camera is active.</div>
+              <div className="text-xs">
+                Hand speeds will appear here while the camera is active.
+              </div>
             ) : (
               Object.entries(handSpeeds).map(([hand, speed]) => (
-                <div key={hand} className="p-2 rounded bg-zinc-100 dark:bg-zinc-800">
+                <div
+                  key={hand}
+                  className="p-2 rounded bg-zinc-100 dark:bg-zinc-800"
+                >
                   <div className="font-medium">Hand {Number(hand) + 1}</div>
                   <div>{Math.round(speed)} px/s (vertical)</div>
                 </div>
@@ -696,7 +774,11 @@ const HAND_CONNECTIONS = [
   [0, 17],
 ];
 
-function drawConnections(ctx: CanvasRenderingContext2D, landmarks: any[], connections: number[][]) {
+function drawConnections(
+  ctx: CanvasRenderingContext2D,
+  landmarks: any[],
+  connections: number[][]
+) {
   ctx.strokeStyle = "#00FF00";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -704,9 +786,9 @@ function drawConnections(ctx: CanvasRenderingContext2D, landmarks: any[], connec
     const start = landmarks[connection[0]];
     const end = landmarks[connection[1]];
     // Mirror X when drawing so overlays align with the mirrored camera image
-    const startX = ctx.canvas.width - (start.x * ctx.canvas.width);
+    const startX = ctx.canvas.width - start.x * ctx.canvas.width;
     const startY = start.y * ctx.canvas.height;
-    const endX = ctx.canvas.width - (end.x * ctx.canvas.width);
+    const endX = ctx.canvas.width - end.x * ctx.canvas.width;
     const endY = end.y * ctx.canvas.height;
     ctx.moveTo(startX, startY);
     ctx.lineTo(endX, endY);
@@ -714,11 +796,15 @@ function drawConnections(ctx: CanvasRenderingContext2D, landmarks: any[], connec
   ctx.stroke();
 }
 
-function drawLandmarks(ctx: CanvasRenderingContext2D, landmarks: any[], style: { color: string; lineWidth: number }) {
+function drawLandmarks(
+  ctx: CanvasRenderingContext2D,
+  landmarks: any[],
+  style: { color: string; lineWidth: number }
+) {
   ctx.fillStyle = style.color;
   for (const landmark of landmarks) {
     // Mirror X so landmarks align with mirrored camera image
-    const x = ctx.canvas.width - (landmark.x * ctx.canvas.width);
+    const x = ctx.canvas.width - landmark.x * ctx.canvas.width;
     const y = landmark.y * ctx.canvas.height;
     ctx.beginPath();
     ctx.arc(x, y, 3, 0, 2 * Math.PI);
