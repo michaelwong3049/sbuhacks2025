@@ -61,10 +61,8 @@ export class Piano {
     });
     
     // Add reverb for realistic room sound
-    this.reverb = new Tone.Reverb({
-      roomSize: 0.5, // More spacious
-      dampening: 2500, // Slightly brighter reverb
-    });
+    // Tone.Reverb constructor takes decay time in seconds, not an options object
+    this.reverb = new Tone.Reverb(0.5); // 0.5 seconds decay
     
     // Connect: synth -> compressor -> filter -> reverb -> destination
     this.synth.connect(this.compressor);

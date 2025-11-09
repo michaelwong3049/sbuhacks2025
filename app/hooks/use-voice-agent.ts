@@ -32,6 +32,7 @@ export interface VoiceAgentHookReturn {
   connect: () => void;
   disconnect: () => void;
   sendPerformanceUpdate: (attempt: AttemptData) => void;
+  sendContextualUpdate: (message: string) => void;
 
   // Callbacks (set by consumer)
   onToolCall: (toolCall: ToolCallData) => void;
@@ -254,73 +255,64 @@ export function useVoiceAgent(): VoiceAgentHookReturn {
         console.log("\n" + "=".repeat(60));
         console.log("🎤 CONNECTING TO ELEVENLABS");
         console.log("=".repeat(60));
-        console.log("📤 Step 1: Fetching credentials from API route...");
+        console.log("📤 Step 1: Using PUBLIC agent (no API key needed)");
         console.log("   Agent ID:", agentId);
         console.log("   Agent ID length:", agentId.length);
 
         setState("connecting");
 
-        // Fetch API key and agent ID from server-side API route (more secure than NEXT_PUBLIC)
-        // Agent ID can come from request or server env var
-        const response = await fetch("/api/elevenlabs-session", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ agentId: agentId || undefined }),
-        });
-
-        console.log("📥 Step 2: API route response received");
-        console.log("   Response status:", response.status, response.statusText);
-        console.log("   Response ok:", response.ok);
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          console.error("❌ API route error:", errorData);
-          throw new Error(errorData.error || "Failed to get session credentials");
-        }
-
-        const responseData = await response.json();
-        console.log("📦 Step 3: Response data parsed");
-        console.log("   Response keys:", Object.keys(responseData));
-        console.log("   Has agentId:", !!responseData.agentId);
-        console.log("   Has apiKey:", !!responseData.apiKey);
-        console.log("   Agent ID:", responseData.agentId);
-        console.log("   API key length:", responseData.apiKey?.length);
-
-        const { apiKey: apiKeyFromServer } = responseData;
-
-        if (!apiKeyFromServer) {
-          console.error("❌ API key not returned from server");
-          setError("ElevenLabs API key not configured on server");
+        if (!agentId) {
+          console.error("❌ Agent ID is required");
+          setError("Agent ID is required");
           return;
         }
 
-        const trimmedApiKey = apiKeyFromServer.trim();
-        if (!trimmedApiKey) {
-          console.error("❌ API key is empty");
-          setError("Invalid API key received from server");
-          return;
-        }
-
-        console.log("\n📦 Step 4: Importing ElevenLabs SDK...");
+        console.log("\n📦 Step 2: Importing ElevenLabs SDK...");
         const { Conversation } = await import("@elevenlabs/client");
         console.log("   ✅ SDK imported");
 
-        console.log("\n🔌 Step 5: Starting ElevenLabs conversation...");
+        console.log("\n🔌 Step 3: Starting ElevenLabs conversation...");
         console.log("   Agent ID:", agentId);
         console.log("   Agent ID length:", agentId.length);
-        console.log("   API key length:", trimmedApiKey.length);
-        console.log("   API key starts with:", trimmedApiKey.substring(0, 8) + "...");
-        console.log("   API key ends with:", "..." + trimmedApiKey.substring(trimmedApiKey.length - 4));
-        console.log("   Conversation class:", Conversation);
-        console.log("   startSession method:", typeof Conversation.startSession);
+        console.log("   Connection type: websocket");
+        console.log("   NOTE: Using PUBLIC agent - no authorization parameter needed!");
+        console.log("   According to ElevenLabs docs, public agents only need agentId");
 
-        // Create config object first to log it
+        // For PUBLIC agents, we only need agentId and connectionType
+        // NO authorization parameter! The SDK documentation clearly states:
+        // "For public agents, you can use the ID directly" - no API key needed
+        // For private agents, we would need a signedUrl (obtained from server with API key)
         const conversationConfig = {
           agentId: agentId,
-          authorization: trimmedApiKey,
           connectionType: "websocket" as const,
+          
+          // Client tools allow the agent to control the lesson UI
+          // NOTE: These tool names must match exactly what's configured in ElevenLabs dashboard
+          clientTools: {
+            start_lesson_exercise: async (parameters: { exerciseName: string; targetNotes: string[]; tempo?: number }) => {
+              console.log("🔧 Client tool called: start_lesson_exercise", parameters);
+              // This will trigger the tool call callback in the frontend via onMessage
+              return "Exercise started";
+            },
+            update_lesson_phase: async (parameters: { phase: string }) => {
+              console.log("🔧 Client tool called: update_lesson_phase", parameters);
+              return "Phase updated";
+            },
+            play_demonstration: async (parameters: { notes: string[] }) => {
+              console.log("🔧 Client tool called: play_demonstration", parameters);
+              return "Demonstration played";
+            },
+            get_performance_metrics: async () => {
+              console.log("🔧 Client tool called: get_performance_metrics");
+              return "Metrics retrieved";
+            },
+            move_to_next_lesson: async () => {
+              console.log("🔧 Client tool called: move_to_next_lesson");
+              // This will trigger the tool call callback in the frontend via onMessage
+              return "Moving to next lesson";
+            },
+          },
+          
           onConnect: () => {
             console.log("\n" + "=".repeat(60));
             console.log("✅ CONNECTED TO ELEVENLABS AGENT");
@@ -376,23 +368,30 @@ export function useVoiceAgent(): VoiceAgentHookReturn {
             console.log("📩 Message type:", message?.type);
             console.log("📩 Message keys:", message ? Object.keys(message) : "no message");
 
-            if (message.type === "agent_response" || message.role === "agent") {
+            // Handle agent responses (speaking)
+            if (message.type === "agent_response" || message.role === "agent" || (message.type === "message" && message.role === "assistant")) {
               setState("speaking");
-              if (message.text || message.content) {
-                onAgentSpeakingRef.current(message.text || message.content);
+              const text = message.text || message.content || message.message?.text || message.message?.content;
+              if (text) {
+                console.log("🗣️ Agent speaking:", text);
+                onAgentSpeakingRef.current(text);
               }
             }
 
-            if (message.type === "tool_call" || message.tool_call) {
+            // Handle tool calls
+            if (message.type === "tool_call" || message.tool_call || (message.type === "message" && message.tool_calls)) {
+              const toolCallData = message.tool_call || message.tool_calls?.[0] || message;
               const toolCall: ToolCallData = {
-                tool_name: message.tool_call?.name || message.name,
-                parameters: message.tool_call?.parameters || message.parameters,
+                tool_name: toolCallData.name || toolCallData.function?.name || message.name,
+                parameters: toolCallData.parameters || toolCallData.function?.arguments || (typeof toolCallData.function?.arguments === "string" ? JSON.parse(toolCallData.function.arguments) : toolCallData.parameters) || message.parameters,
               };
+              console.log("🔧 Processing tool call:", toolCall);
               onToolCallRef.current(toolCall);
               sendMessage("tool_call", { toolCall });
             }
 
-            if (message.type === "listening" || message.state === "listening") {
+            // Handle listening state
+            if (message.type === "listening" || message.state === "listening" || (message.type === "message" && message.role === "user")) {
               setState("listening");
               onAgentListeningRef.current();
             }
@@ -494,13 +493,55 @@ export function useVoiceAgent(): VoiceAgentHookReturn {
   }, [connectToElevenLabs]);
 
   /**
+   * Send contextual update to the voice agent
+   */
+  const sendContextualUpdate = useCallback(
+    (message: string) => {
+      if (elevenLabsConversationRef.current) {
+        try {
+          // Check if sendContextualUpdate method exists
+          if (typeof elevenLabsConversationRef.current.sendContextualUpdate === "function") {
+            elevenLabsConversationRef.current.sendContextualUpdate(message);
+            console.log("📤 ✅ Sent contextual update to ElevenLabs:", message);
+          } else {
+            console.warn("⚠️ sendContextualUpdate method not found on conversation object");
+            console.log("📤 Available methods:", Object.keys(elevenLabsConversationRef.current));
+            // Try alternative method names
+            if (typeof (elevenLabsConversationRef.current as any).sendContext === "function") {
+              (elevenLabsConversationRef.current as any).sendContext(message);
+            } else {
+              // Fallback: send via WebSocket
+              sendMessage("contextual_update", { message });
+            }
+          }
+        } catch (error) {
+          console.error("❌ Failed to send contextual update:", error);
+          // Fallback: send via WebSocket
+          sendMessage("contextual_update", { message });
+        }
+      } else {
+        console.warn("⚠️ ElevenLabs conversation not active, cannot send contextual update.");
+        console.warn("   Message that would have been sent:", message);
+      }
+    },
+    [sendMessage]
+  );
+
+  /**
    * Send performance update to the voice agent
    */
   const sendPerformanceUpdate = useCallback(
     (attempt: AttemptData) => {
+      // Send as contextual update so agent can respond in real-time
+      const message = `Student just played note ${attempt.notePressed}. Target was ${attempt.targetNote}. ${attempt.correct ? "Correct!" : "Incorrect."}`;
+      
+      // Use sendContextualUpdate which is now defined above
+      sendContextualUpdate(message);
+      
+      // Also send via WebSocket as backup
       sendMessage("performance_update", { attempt });
     },
-    [sendMessage]
+    [sendMessage, sendContextualUpdate]
   );
 
   /**
@@ -552,6 +593,7 @@ export function useVoiceAgent(): VoiceAgentHookReturn {
     connect,
     disconnect,
     sendPerformanceUpdate,
+    sendContextualUpdate,
 
     // Callbacks
     onToolCall: onToolCallRef.current,
