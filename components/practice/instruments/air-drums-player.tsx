@@ -44,12 +44,37 @@ export default function Home() {
   // Visual flash timestamps for zones when a hit is registered
   const hitFlashRef = useRef<Map<string, number>>(new Map());
   const prevVerticalSpeedRef = useRef<Map<number, number>>(new Map());
+  const prevHorizontalSpeedRef = useRef<Map<number, number>>(new Map());
+  // Preloaded images for drums (optional SVGs in public/assets)
+  const imagesRef = useRef<Record<string, HTMLImageElement | null>>({
+    left: null,
+    right: null,
+    bass: null,
+    hihat: null,
+    crash: null,
+  });
 
   useEffect(() => {
     if (!videoRef.current || !canvasRef.current) return;
 
   // Initialize drum kit for sound playback
   drumKitRef.current = new DrumKit();
+
+  // Preload optional drum images from /assets (public folder)
+  const loadImg = (path: string) => {
+    try {
+      const i = new Image();
+      i.src = path;
+      return i;
+    } catch (e) {
+      return null;
+    }
+  };
+  imagesRef.current.left = loadImg("/assets/snare.svg");
+  imagesRef.current.right = loadImg("/assets/snare.svg");
+  imagesRef.current.bass = loadImg("/assets/bass.svg");
+  imagesRef.current.hihat = loadImg("/assets/hihat.svg");
+  imagesRef.current.crash = loadImg("/assets/crash.svg");
 
     // Load MediaPipe Hands from CDN
     const initHands = () => {
@@ -176,8 +201,11 @@ export default function Home() {
                   const bassY = canvasHeight * 0.88;
                   const bassRadius = Math.min(canvasWidth, canvasHeight) * 0.18;
 
-                  const hiHatX = canvasWidth * 0.5;
-                  const hiHatY = canvasHeight * 0.12; // move hi-hat to top
+                  // Move hi-hat toward the right side of the screen and make
+                  // it trigger only on a rightward (positive) horizontal velocity.
+                  // Place the hi-hat slightly above center on the right side.
+                  const hiHatX = canvasWidth * 0.85; // right side
+                  const hiHatY = canvasHeight * 0.42; // slightly up from middle-right
                   const hiHatRadius = Math.min(canvasWidth, canvasHeight) * 0.12; // make hi-hat easier to hit
 
                   // distance to each zone center
@@ -185,6 +213,11 @@ export default function Home() {
                   const distRight = Math.hypot(indexVisualX - rightDrumX, indexTip.y - drumY);
                   const distBass = Math.hypot(indexVisualX - bassX, indexTip.y - bassY);
                   const distHiHat = Math.hypot(indexVisualX - hiHatX, indexTip.y - hiHatY);
+                  // crash on left (mirror of hi-hat): mid-left crash cymbal
+                  const crashX = canvasWidth * 0.15;
+                  const crashY = canvasHeight * 0.42;
+                  const crashRadius = hiHatRadius * 1.25; // slightly larger
+                  const distCrash = Math.hypot(indexVisualX - crashX, indexTip.y - crashY);
 
                   // Helper to register hit (set per-hand and per-zone cooldowns and visual flash)
                   const registerHit = (zoneId: string, play: () => void) => {
@@ -245,21 +278,37 @@ export default function Home() {
                     }
                   }
 
-                  // Hi-hat: top zone, triggered by upward motion (user flicks up into the hi-hat)
-                  // Upward motion produces negative verticalSpeed (dy < 0)
+
+                  // Hi-hat: right-side zone, triggered by a rightward horizontal
+                  // motion. We require a rising-edge on horizontal speed to
+                  // avoid repeated triggers from sustained motion.
+                  const prevHSpeed = prevHorizontalSpeedRef.current.get(handIndex) || 0;
                   if (
                     distHiHat < hiHatRadius &&
-                    dy < -MIN_DY_PIXELS &&
-                    verticalSpeed < -VELOCITY_THRESHOLD &&
-                    prevSpeed >= -VELOCITY_THRESHOLD
+                    Math.abs(dx) > 4 && // small positional guard to ignore tiny jitter
+                    horizontalSpeed > HORIZ_SPEED_THRESHOLD &&
+                    prevHSpeed <= HORIZ_SPEED_THRESHOLD
                   ) {
                     if (drumKitRef.current) {
                       registerHit("hihat", () => drumKitRef.current!.playHiHat());
                     }
                   }
 
-                  // store current vertical speed for next-frame edge detection
+                  // Crash: left-side mid zone, triggered by leftward horizontal motion
+                  if (
+                    distCrash < crashRadius &&
+                    Math.abs(dx) > 4 &&
+                    horizontalSpeed < -HORIZ_SPEED_THRESHOLD &&
+                    prevHSpeed >= -HORIZ_SPEED_THRESHOLD
+                  ) {
+                    if (drumKitRef.current) {
+                      registerHit("crash", () => drumKitRef.current!.playCrash());
+                    }
+                  }
+
+                  // store current vertical and horizontal speed for next-frame edge detection
                   prevVerticalSpeedRef.current.set(handIndex, verticalSpeed);
+                  prevHorizontalSpeedRef.current.set(handIndex, horizontalSpeed);
                 }
 
                 // Update previous position (store index & thumb to preserve existing data shape)
@@ -346,10 +395,23 @@ export default function Home() {
                 canvasCtx.fillStyle = `rgba(255,255,200,${0.5 * alpha})`;
                 canvasCtx.fill();
               }
-              drawDrum(x, y, radius, label, fillColor);
-              if (emoji) {
-                canvasCtx.font = `${Math.max(16, Math.round(radius * 0.9))}px Arial`;
-                canvasCtx.fillText(emoji, x, y + Math.round(radius * 0.05));
+              // If an image was preloaded for this drum, draw it centered.
+              const img = imagesRef.current[id as keyof typeof imagesRef.current];
+              if (img && img.complete) {
+                const w = Math.round(radius * 2.2);
+                canvasCtx.drawImage(img, x - w / 2, y - w / 2, w, w);
+                // draw label below
+                canvasCtx.fillStyle = "#fff";
+                canvasCtx.font = `${Math.max(12, Math.round(radius * 0.28))}px Arial`;
+                canvasCtx.textAlign = "center";
+                canvasCtx.fillText(label, x, y + radius + 18);
+              } else {
+                // fallback to procedural drawing
+                drawDrum(x, y, radius, label, fillColor);
+                if (emoji) {
+                  canvasCtx.font = `${Math.max(16, Math.round(radius * 0.9))}px Arial`;
+                  canvasCtx.fillText(emoji, x, y + Math.round(radius * 0.05));
+                }
               }
             };
 
@@ -357,17 +419,23 @@ export default function Home() {
             drawDrumWithFlash("left", leftDrumX, drumY, drumRadius, "🥁 Snare (L)", "#4ECDC4", "🥁");
             drawDrumWithFlash("right", rightDrumX, drumY, drumRadius, "🥁 Snare (R)", "#FF6B6B", "🥁");
 
+            // Draw crash cymbal on mid-left
+            const crashX = canvasWidth * 0.15;
+            const crashY = canvasHeight * 0.42;
+            const crashRadius = Math.min(canvasWidth, canvasHeight) * 0.15;
+            drawDrumWithFlash("crash", crashX, crashY, crashRadius, "💥 Crash", "#D8A600", "💥");
+
             // Draw bass (kick) at bottom center
             const bassX = canvasWidth * 0.5;
             const bassY = canvasHeight * 0.88;
             const bassRadius = Math.min(canvasWidth, canvasHeight) * 0.18;
             drawDrumWithFlash("bass", bassX, bassY, bassRadius, "🔘 Bass", "#222222", "🔊");
 
-            // Draw hi-hat at top center (match detection zone)
-            const hiHatX = canvasWidth * 0.5;
-            const hiHatY = canvasHeight * 0.12;
+            // Draw hi-hat at middle-right (match detection zone)
+            const hiHatX = canvasWidth * 0.85;
+            const hiHatY = canvasHeight * 0.42;
             const hiHatRadius = Math.min(canvasWidth, canvasHeight) * 0.12;
-            drawDrumWithFlash("hihat", hiHatX, hiHatY, hiHatRadius, "🎧 Hi-Hat", "#B4C6FF", "🎵");
+            drawDrumWithFlash("hihat", hiHatX, hiHatY, hiHatRadius, "🎧 Hi-Hat (R)", "#B4C6FF", "🎵");
 
             // Draw hand landmarks
             if (results.multiHandLandmarks) {
