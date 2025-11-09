@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Piano } from "@/app/lib/sound/piano";
 import { AutoPaperDetector } from "@/app/lib/vision/auto-paper-detector";
+import { PeerManager } from "@/app/lib/webrtc/peer-manager";
 
 type HandsType = {
   setOptions: (options: any) => void;
@@ -11,7 +12,11 @@ type HandsType = {
   close: () => Promise<void>;
 };
 
-export default function Home() {
+interface PianoPlayerProps {
+  peerManager?: PeerManager | null;
+}
+
+export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [handPositions, setHandPositions] = useState<{
@@ -180,59 +185,86 @@ export default function Home() {
                 canvasCtx.fill();
               });
 
-              // Draw key regions
-              // DON'T flip coordinates - CSS mirroring handles it automatically
+              // Draw key regions as a realistic piano keyboard:
+              // - White keys (with separators)
+              // - Black keys placed above gaps (skipped above E and B)
+              // - Pressed keys show a depressed shading and brighter highlight
               const noteNames = ["C", "D", "E", "F", "G", "A", "B", "C", "D", "E"];
+
+              // First draw all white keys (base layer)
               keyRegions.forEach((keyRegion, i) => {
-                // Check if this key is currently pressed
                 const isPressed = Array.from(activeKeysRef.current.values()).includes(keyRegion.noteIndex);
-                
-                // Draw key region (subtle background) - use raw coordinates
-                // Make rectangle borders more subtle to show spacing better
-                canvasCtx.fillStyle = isPressed 
-                  ? "rgba(255, 255, 0, 0.15)" 
-                  : "rgba(255, 255, 255, 0.05)"; // More transparent to show spacing
+
+                // White key background
+                canvasCtx.fillStyle = isPressed ? "#FFF7D6" : "#FFFFFF"; // slight warm tint when pressed
                 canvasCtx.fillRect(keyRegion.x, keyRegion.y, keyRegion.width, keyRegion.height);
-                
-                // Draw key border (more subtle to show spacing)
-                canvasCtx.strokeStyle = isPressed ? "rgba(255, 255, 0, 0.6)" : "rgba(0, 255, 0, 0.3)";
-                canvasCtx.lineWidth = 1.5;
-                canvasCtx.strokeRect(keyRegion.x, keyRegion.y, keyRegion.width, keyRegion.height);
-                
-                // Draw elliptical hitbox (better than circle for piano keys) - BLUE ELLIPSE
-                // Ellipse is wider horizontally, matching the key shape better
-                
-                // Draw hitbox ellipse - use raw coordinates
-                canvasCtx.fillStyle = isPressed 
-                  ? "rgba(0, 150, 255, 0.6)" // Bright blue when pressed
-                  : "rgba(0, 150, 255, 0.3)"; // Semi-transparent blue when not pressed
+
+                // Key top highlight (subtle) to give a beveled look
+                const grad = canvasCtx.createLinearGradient(keyRegion.x, keyRegion.y, keyRegion.x, keyRegion.y + keyRegion.height);
+                grad.addColorStop(0, isPressed ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.35)");
+                grad.addColorStop(1, "rgba(200,200,200,0.03)");
+                canvasCtx.fillStyle = grad;
+                canvasCtx.fillRect(keyRegion.x, keyRegion.y, keyRegion.width, Math.max(6, keyRegion.height * 0.12));
+
+                // Key border / separator lines
+                canvasCtx.strokeStyle = "#333";
+                canvasCtx.lineWidth = 1;
                 canvasCtx.beginPath();
-                canvasCtx.ellipse(
-                  keyRegion.hitboxCenterX,
-                  keyRegion.hitboxCenterY,
-                  keyRegion.hitboxRadiusX,
-                  keyRegion.hitboxRadiusY,
-                  0, // rotation
-                  0, // start angle
-                  Math.PI * 2 // end angle
-                );
-                canvasCtx.fill();
-                
-                // Draw hitbox border
-                canvasCtx.strokeStyle = isPressed ? "#00AAFF" : "#0099FF";
-                canvasCtx.lineWidth = 2;
+                // Left edge
+                canvasCtx.moveTo(keyRegion.x, keyRegion.y);
+                canvasCtx.lineTo(keyRegion.x, keyRegion.y + keyRegion.height);
+                // Right edge
+                canvasCtx.moveTo(keyRegion.x + keyRegion.width, keyRegion.y);
+                canvasCtx.lineTo(keyRegion.x + keyRegion.width, keyRegion.y + keyRegion.height);
                 canvasCtx.stroke();
-                
-                // Draw note label (smaller, above hitbox)
-                canvasCtx.fillStyle = "#FFFFFF";
-                canvasCtx.font = "bold 16px Arial";
+
+                // If pressed, draw a shadow to simulate depressed key
+                if (isPressed) {
+                  canvasCtx.fillStyle = "rgba(0,0,0,0.08)";
+                  canvasCtx.fillRect(keyRegion.x + 2, keyRegion.y + keyRegion.height * 0.55, keyRegion.width - 4, keyRegion.height * 0.45);
+                }
+
+                // Draw note label at bottom-center of key
+                canvasCtx.fillStyle = "#000000";
+                canvasCtx.font = "bold 14px Arial";
                 canvasCtx.textAlign = "center";
-                canvasCtx.fillText(
-                  noteNames[i],
-                  keyRegion.hitboxCenterX,
-                  keyRegion.hitboxCenterY - keyRegion.hitboxRadiusY - 8
-                );
+                canvasCtx.fillText(noteNames[i], keyRegion.x + keyRegion.width / 2, keyRegion.y + keyRegion.height - 10);
               });
+
+              // Then draw black keys on top where appropriate
+              // Black keys sit between white keys except after E and B
+              for (let i = 0; i < keyRegions.length - 1; i++) {
+                const left = keyRegions[i];
+                const right = keyRegions[i + 1];
+                const note = noteNames[i];
+                // No black key after E or B
+                if (note === "E" || note === "B") continue;
+
+                // Position black key slightly to the right of the left white key's center
+                const blackWidth = Math.round(Math.min(left.width, right.width) * 0.6);
+                const blackHeight = Math.round(left.height * 0.62);
+                const blackX = Math.round(left.x + left.width * 0.66);
+                const blackY = left.y;
+
+                // See if the black key is currently pressed by checking if any active key maps to the right adjacent white key
+                // (approximate: if finger is over the gap, we'll still show the black key as available)
+                const isPressed = false; // keep black keys visual-only; paper touch still triggers white keys
+
+                canvasCtx.fillStyle = "#000000";
+                canvasCtx.fillRect(blackX, blackY, blackWidth, blackHeight);
+
+                // Slight highlight on black key
+                const bGrad = canvasCtx.createLinearGradient(blackX, blackY, blackX, blackY + blackHeight);
+                bGrad.addColorStop(0, "rgba(255,255,255,0.04)");
+                bGrad.addColorStop(1, "rgba(0,0,0,0.6)");
+                canvasCtx.fillStyle = bGrad;
+                canvasCtx.fillRect(blackX, blackY, blackWidth, blackHeight);
+              }
+
+              // Draw a subtle paper border on top of keys to keep the look cohesive
+              canvasCtx.strokeStyle = "rgba(100,100,100,0.4)";
+              canvasCtx.lineWidth = 2;
+              canvasCtx.strokeRect(paperCorners.topLeft.x, paperCorners.topLeft.y, paperCorners.topRight.x - paperCorners.topLeft.x, paperCorners.bottomLeft.y - paperCorners.topLeft.y);
             };
 
             // Process hand detection and piano key presses (only when paper is detected)
@@ -310,6 +342,21 @@ export default function Home() {
                       const noteName = pianoRef.current.getNotes()[keyIndex];
                       console.log(`🎹 ✅ TRIGGER: Playing key ${keyIndex} (${noteName}) - Z=${indexTipZ.toFixed(3)}`);
                       pianoRef.current.playNote(keyIndex);
+                      
+                      // Send sound event to peers if peerManager is available
+                      if (peerManager) {
+                        try {
+                          console.log('📤 Sending piano sound event to peers:', { type: 'piano', noteIndex: keyIndex });
+                          peerManager.sendSoundEvent({
+                            type: 'piano',
+                            noteIndex: keyIndex,
+                            velocity: 1,
+                          });
+                          console.log('✅ Piano sound event sent successfully');
+                        } catch (error) {
+                          console.error('❌ Failed to send piano sound event:', error);
+                        }
+                      }
                     } else {
                       console.error("❌ Piano ref is null!");
                     }

@@ -10,7 +10,15 @@ type HandsType = {
   close: () => Promise<void>;
 };
 
-export default function TambourinePlayer() {
+import { PeerManager } from "@/app/lib/webrtc/peer-manager";
+
+interface TambourinePlayerProps {
+  peerManager?: PeerManager | null;
+}
+
+export default function TambourinePlayer({
+  peerManager = null,
+}: TambourinePlayerProps = {}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isActive, setIsActive] = useState(false);
