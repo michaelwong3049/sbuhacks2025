@@ -1,157 +1,145 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 import * as Tone from "tone";
 
 /**
- * Piano using Tone.js with enhanced synthesis for realistic piano sounds
- * Uses FMSynth with carefully tuned parameters to mimic a real piano
+ * Piano that prefers sampled playback via soundfont-player when available,
+ * but gracefully falls back to a Tone.js layered synth if the module is not
+ * installed or fails to load. This prevents build-time resolution errors in
+ * environments where the dependency hasn't been installed.
  */
 export class Piano {
-  private synth: Tone.PolySynth<Tone.FMSynth>;
-  private filter: Tone.Filter;
-  private reverb: Tone.Reverb;
-  private compressor: Tone.Compressor;
-  private initialized: boolean = false;
-  
-  // Piano notes (extended: C4 to E5)
+  private audioCtx: AudioContext | null = null;
+  private player: any = null; // soundfont-player instrument when available
+  private initialized = false;
+
+  // Fallback Tone.js synthesizers
+  private toneFallback = false;
+  private fallbackStrings?: Tone.PolySynth;
+  private fallbackHammer?: Tone.NoiseSynth;
+
+  // C4..E5
   private readonly notes = ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5"];
 
-  constructor() {
-    // Create a realistic piano sound using FMSynth with multiple effects
-    // This configuration mimics the attack, decay, and harmonics of a real piano
-    
-    this.synth = new Tone.PolySynth({
-      maxPolyphony: 10,
-      voice: Tone.FMSynth,
-      options: {
-        harmonicity: 2.5, // Creates rich harmonics
-        modulationIndex: 12, // More complex, piano-like tone
-        oscillator: {
-          type: "sine", // Carrier wave
-        },
-        envelope: {
-          attack: 0.005, // Very quick attack (piano hammers hit fast)
-          decay: 0.25, // Gradual decay like a real piano
-          sustain: 0.08, // Low sustain (piano notes decay naturally)
-          release: 0.5, // Natural release
-        },
-        modulation: {
-          type: "square", // Modulator for richer harmonics
-        },
-        modulationEnvelope: {
-          attack: 0.008,
-          decay: 0.2,
-          sustain: 0.15,
-          release: 0.35,
-        },
-      },
-    });
-    
-    // Add compressor for more natural dynamics
-    this.compressor = new Tone.Compressor({
-      threshold: -24,
-      ratio: 4,
-      attack: 0.003,
-      release: 0.1,
-    });
-    
-    // Add low-pass filter to warm up the sound and remove harsh frequencies
-    this.filter = new Tone.Filter({
-      type: "lowpass",
-      frequency: 2800, // Cut harsh high frequencies
-      Q: 0.8, // Gentle rolloff
-    });
-    
-    // Add reverb for realistic room sound
-    this.reverb = new Tone.Reverb({
-      roomSize: 0.5, // More spacious
-      dampening: 2500, // Slightly brighter reverb
-    });
-    
-    // Connect: synth -> compressor -> filter -> reverb -> destination
-    this.synth.connect(this.compressor);
-    this.compressor.connect(this.filter);
-    this.filter.connect(this.reverb);
-    this.reverb.toDestination();
+  constructor() {}
+
+  private async initToneFallback() {
+    // Initialize a small layered Tone.js piano as a fallback
+    await Tone.start();
+    this.fallbackStrings = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.002, decay: 1.6, sustain: 0.06, release: 1.2 },
+      volume: -6,
+    }).toDestination();
+
+    this.fallbackHammer = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.0006, decay: 0.05, sustain: 0 }, volume: -8 }).toDestination();
+    this.toneFallback = true;
+    console.log("🎹 Piano: using Tone.js fallback synth");
   }
 
-  /**
-   * Initialize Tone.js (must be called after user interaction)
-   */
   async initialize() {
-    if (!this.initialized) {
+    if (this.initialized) return;
+
+    // Ensure AudioContext exists (some browsers require user gesture)
+    this.audioCtx = this.audioCtx || new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (this.audioCtx.state === "suspended") {
       try {
-        await Tone.start();
-        // Initialize reverb (generates impulse response)
-        await this.reverb.generate();
-        console.log("🎹 Piano initialized - Enhanced synthesized piano sound ready!");
-        this.initialized = true;
-      } catch (error) {
-        console.error("Failed to initialize piano:", error);
+        await this.audioCtx.resume();
+      } catch (e) {
+        // ignore
       }
+    }
+
+    // Attempt to dynamically import soundfont-player at runtime.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Soundfont = await import("soundfont-player");
+      // If import succeeded, try to create instrument
+      try {
+        this.player = await Soundfont.instrument(this.audioCtx, "acoustic_grand_piano", { gain: 1 });
+        this.initialized = true;
+        console.log("🎹 Piano initialized (soundfont-player) - acoustic_grand_piano ready");
+        return;
+      } catch (err) {
+        console.warn("soundfont-player loaded but failed to create instrument:", err);
+        // fall through to Tone fallback
+      }
+    } catch (err) {
+      // Module not found or dynamic import failed — fall back to Tone.js synth
+      console.warn("soundfont-player not available, falling back to Tone.js synth:", err && err.message ? err.message : err);
+    }
+
+    // Tone fallback
+    try {
+      await this.initToneFallback();
+      this.initialized = true;
+    } catch (e) {
+      console.error("Failed to initialize fallback Tone.js piano:", e);
     }
   }
 
-  /**
-   * Play a piano note
-   * @param noteIndex - Index of the note (0-9 for C4 to E5)
-   */
-  playNote(noteIndex: number) {
+  playNote(noteIndex: number, velocity: number = 1) {
     if (noteIndex < 0 || noteIndex >= this.notes.length) {
       console.warn(`Invalid note index: ${noteIndex}`);
       return;
     }
-    
+
     const note = this.notes[noteIndex];
-    
-    // Ensure Tone.js is initialized
+
     if (!this.initialized) {
-      console.log("🎹 Piano not initialized, initializing now...");
-      this.initialize().then(() => {
-        this.triggerNote(note);
-      }).catch((error) => {
-        console.error("Failed to initialize piano:", error);
-      });
+      this.initialize().then(() => this.playNote(noteIndex, velocity)).catch((e) => console.error(e));
       return;
     }
-    
-    this.triggerNote(note);
-  }
 
-  /**
-   * Actually trigger the note
-   */
-  private triggerNote(note: string) {
-    try {
-      // Use synthesized piano sound with realistic attack and release
-      // "8n" = eighth note duration, gives a nice piano-like note
-      this.synth.triggerAttackRelease(note, "8n");
-      console.log(`🎹 Playing note: ${note}`);
-    } catch (error) {
-      console.error(`Failed to play note ${note}:`, error);
+    // If sampled player is available, use it
+    if (this.player && typeof this.player.play === "function") {
+      try {
+        const gain = Math.max(0.15, Math.min(1.2, velocity));
+        this.player.play(note, 0, { gain });
+        return;
+      } catch (e) {
+        console.warn("soundfont-player failed to play, falling back to synth:", e);
+      }
+    }
+
+    // Fallback: Tone.js synth layers
+    if (this.toneFallback && this.fallbackStrings) {
+      try {
+        const vel = Math.max(0.15, Math.min(1, velocity));
+        this.fallbackHammer?.triggerAttackRelease("32n", undefined, vel * 0.6);
+        this.fallbackStrings.triggerAttackRelease(note, 1.6, undefined, vel);
+      } catch (e) {
+        console.error("Failed to play fallback synth note:", e);
+      }
     }
   }
 
-  /**
-   * Get all available notes
-   */
   getNotes(): string[] {
     return [...this.notes];
   }
 
-  /**
-   * Dispose of the piano
-   */
-  dispose() {
-    if (this.synth) {
-      this.synth.dispose();
-    }
-    if (this.compressor) {
-      this.compressor.dispose();
-    }
-    if (this.filter) {
-      this.filter.dispose();
-    }
-    if (this.reverb) {
-      this.reverb.dispose();
+  async dispose() {
+    try {
+      // Dispose player if it has a stop/close method
+      if (this.player && typeof this.player.stop === "function") {
+        try { this.player.stop(); } catch {}
+        this.player = null;
+      }
+
+      if (this.toneFallback) {
+        try {
+          this.fallbackStrings?.dispose();
+          this.fallbackHammer?.dispose();
+        } catch {}
+        this.toneFallback = false;
+      }
+
+      if (this.audioCtx) {
+        try { await this.audioCtx.close(); } catch {}
+        this.audioCtx = null;
+      }
+      this.initialized = false;
+    } catch (e) {
+      console.warn("Error disposing piano resources:", e);
     }
   }
 }
