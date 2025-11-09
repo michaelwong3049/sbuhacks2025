@@ -1,6 +1,12 @@
 "use client";
 
-export default function TambourinePlayer() {
+import { PeerManager } from "@/app/lib/webrtc/peer-manager";
+
+interface TambourinePlayerProps {
+  peerManager?: PeerManager | null;
+}
+
+export default function TambourinePlayer({ peerManager = null }: TambourinePlayerProps = {}) {
   return (
     <div className="w-full max-w-2xl flex flex-col items-center gap-6 p-8">
       <div className="w-full aspect-video rounded-lg border-2 border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 flex items-center justify-center">

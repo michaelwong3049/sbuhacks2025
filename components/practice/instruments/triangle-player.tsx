@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Triangle } from "@/app/lib/sound/triangle";
+import { PeerManager } from "@/app/lib/webrtc/peer-manager";
 
 type HandsType = {
   setOptions: (options: any) => void;
@@ -10,7 +11,11 @@ type HandsType = {
   close: () => Promise<void>;
 };
 
-export default function TrianglePlayer() {
+interface TrianglePlayerProps {
+  peerManager?: PeerManager | null;
+}
+
+export default function TrianglePlayer({ peerManager = null }: TrianglePlayerProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isActive, setIsActive] = useState(false);
@@ -481,6 +486,19 @@ export default function TrianglePlayer() {
                   console.log("🔺 HIT! Playing triangle - distance to edge:", minDistanceToEdge.toFixed(1), "Z:", fingerZ.toFixed(3));
                   triangleRef.current.play();
                   triangleCooldownRef.current = currentTime;
+                  
+                  // Send sound event to peers if peerManager is available
+                  if (peerManager) {
+                    try {
+                      console.log('📤 Sending triangle sound event to peers');
+                      peerManager.sendSoundEvent({
+                        type: 'triangle',
+                      });
+                      console.log('✅ Triangle sound event sent successfully');
+                    } catch (error) {
+                      console.error('❌ Failed to send triangle sound event:', error);
+                    }
+                  }
                 } else {
                   console.error("❌ Triangle ref is null!");
                 }
@@ -684,7 +702,7 @@ export default function TrianglePlayer() {
         >
           Test Triangle
         </button>
-      </div>
+        </div>
 
       <div className="w-full p-4 bg-blue-50 dark:bg-blue-900 rounded-lg">
         <p className="font-bold text-blue-800 dark:text-blue-200 mb-2">How to Use:</p>

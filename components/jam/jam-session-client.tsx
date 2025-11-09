@@ -8,6 +8,7 @@ import AirDrumsPlayer from "@/components/practice/instruments/air-drums-player";
 import PianoPlayer from "@/components/practice/instruments/piano-player";
 import TambourinePlayer from "@/components/practice/instruments/tambourine-player";
 import TrianglePlayer from "@/components/practice/instruments/triangle-player";
+import RemoteSoundPlayer, { RemoteSoundPlayerHandle } from "./remote-sound-player";
 
 interface PeerInfo {
   id: string;
@@ -25,14 +26,31 @@ export default function JamSessionClient() {
   
   const peerManagerRef = useRef<PeerManager | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const remoteSoundPlayerRef = useRef<RemoteSoundPlayerHandle>(null);
 
   // Initialize peer manager
   useEffect(() => {
     peerManagerRef.current = new PeerManager();
     
-    // Setup message handler
+    // Setup message handler - this handles all messages
     peerManagerRef.current.onMessage((peerId, message) => {
-      handlePeerMessage(peerId, message);
+      // Handle sound events by playing them remotely
+      if (message.type === 'sound-event') {
+        console.log('🎵 Received sound event from peer:', peerId, message.event);
+        if (remoteSoundPlayerRef.current) {
+          try {
+            remoteSoundPlayerRef.current.playRemoteSound(message.event);
+            console.log('✅ Played remote sound:', message.event.type);
+          } catch (error) {
+            console.error('❌ Error playing remote sound:', error);
+          }
+        } else {
+          console.warn('⚠️ RemoteSoundPlayer ref is null - cannot play remote sound');
+        }
+      } else {
+        // Handle other messages (join, instrument-change, etc.)
+        handlePeerMessage(peerId, message);
+      }
     });
 
     // Setup peer connected handler
@@ -95,9 +113,13 @@ export default function JamSessionClient() {
         });
         break;
       case 'hand-data':
-        // In a full implementation, we would visualize other players' hands
-        // For now, we just log it
-        console.log('👋 Hand data from peer:', peerId);
+        // Hand data is handled by RemoteSoundPlayer for sound playback
+        // Could also be used for visualization in the future
+        break;
+      
+      case 'sound-event':
+        // Sound events are handled by RemoteSoundPlayer
+        // This message type is now used for remote sound playback
         break;
     }
   };
@@ -152,15 +174,7 @@ export default function JamSessionClient() {
     }
   };
 
-  /**
-   * Connect to a specific peer by ID
-   */
-  const connectToPeer = async () => {
-    const peerId = prompt('Enter peer ID to connect:');
-    if (peerId && peerManagerRef.current) {
-      await peerManagerRef.current.connectToPeer(peerId);
-    }
-  };
+  // Removed connectToPeer function - now handled inline in the button
 
   /**
    * Handle instrument change
@@ -232,16 +246,40 @@ export default function JamSessionClient() {
                 </div>
               </div>
               
-              <div className="flex gap-2">
-                <button
-                  onClick={connectToPeer}
-                  className="flex-1 h-10 items-center justify-center rounded-md bg-secondary px-4 text-secondary-foreground transition-colors hover:bg-secondary/90 text-sm font-medium"
-                >
-                  Connect to Peer
-                </button>
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    id="peer-id-input"
+                    placeholder="Enter peer's Peer ID to connect..."
+                    className="flex-1 h-10 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <button
+                    onClick={async () => {
+                      const input = document.getElementById('peer-id-input') as HTMLInputElement;
+                      const peerId = input?.value.trim();
+                      if (peerId && peerManagerRef.current) {
+                        console.log('🔗 Connecting to peer:', peerId);
+                        try {
+                          await peerManagerRef.current.connectToPeer(peerId);
+                          input.value = '';
+                          alert('Connection request sent! Waiting for peer to accept...');
+                        } catch (error) {
+                          console.error('❌ Failed to connect:', error);
+                          alert('Failed to connect. Make sure the Peer ID is correct and the peer is online.');
+                        }
+                      } else {
+                        alert('Please enter a Peer ID');
+                      }
+                    }}
+                    className="h-10 items-center justify-center rounded-md bg-primary px-4 text-primary-foreground transition-colors hover:bg-primary/90 text-sm font-medium"
+                  >
+                    Connect to Peer
+                  </button>
+                </div>
                 <button
                   onClick={disconnect}
-                  className="flex-1 h-10 items-center justify-center rounded-md bg-destructive px-4 text-destructive-foreground transition-colors hover:bg-destructive/90 text-sm font-medium"
+                  className="w-full h-10 items-center justify-center rounded-md bg-destructive px-4 text-destructive-foreground transition-colors hover:bg-destructive/90 text-sm font-medium"
                 >
                   Disconnect
                 </button>
@@ -268,20 +306,32 @@ export default function JamSessionClient() {
               )}
 
               {/* Connected Peers */}
-              {peers.size > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold">Connected Peers ({peers.size}):</p>
-                  {Array.from(peers.values()).map((peer) => (
-                    <div key={peer.id} className="flex items-center justify-between p-3 bg-muted rounded-md">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold">Connected Peers ({peers.size}):</p>
+                {peers.size === 0 ? (
+                  <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-md border border-yellow-200 dark:border-yellow-800">
+                    <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                      ⚠️ No peers connected yet. Share your Peer ID above and have others connect to you, or connect to their Peer ID.
+                    </p>
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                      💡 <strong>Important:</strong> For sounds to work, you need to connect to each other. Both people should connect using each other's Peer IDs.
+                    </p>
+                  </div>
+                ) : (
+                  Array.from(peers.values()).map((peer) => (
+                    <div key={peer.id} className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-md border border-green-200 dark:border-green-800">
                       <div>
-                        <p className="font-mono text-sm">{peer.id.substring(0, 16)}...</p>
-                        <p className="text-xs text-muted-foreground">Playing: {peer.instrument}</p>
+                        <p className="font-mono text-sm font-bold text-green-800 dark:text-green-200">{peer.id.substring(0, 16)}...</p>
+                        <p className="text-xs text-green-600 dark:text-green-400">Playing: {peer.instrument}</p>
                       </div>
-                      <div className="h-2 w-2 bg-green-500 rounded-full"></div>
+                      <div className="flex items-center gap-2">
+                        <div className="h-3 w-3 bg-green-500 rounded-full animate-pulse"></div>
+                        <span className="text-xs text-green-600 dark:text-green-400">Connected</span>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  ))
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -297,26 +347,54 @@ export default function JamSessionClient() {
           </div>
         )}
 
+        {/* Remote Sound Player - handles playing sounds from other peers */}
+        {/* Always render when connected so ref is available */}
+        {isConnected && <RemoteSoundPlayer ref={remoteSoundPlayerRef} />}
+
         {/* Instrument Player */}
         {isConnected && (
           <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-            {myInstrument === 'drums' && <AirDrumsPlayer />}
-            {myInstrument === 'piano' && <PianoPlayer />}
-            {myInstrument === 'tambourine' && <TambourinePlayer />}
-            {myInstrument === 'triangle' && <TrianglePlayer />}
+            {myInstrument === 'drums' && <AirDrumsPlayer peerManager={peerManagerRef.current} />}
+            {myInstrument === 'piano' && <PianoPlayer peerManager={peerManagerRef.current} />}
+            {myInstrument === 'tambourine' && <TambourinePlayer peerManager={peerManagerRef.current} />}
+            {myInstrument === 'triangle' && <TrianglePlayer peerManager={peerManagerRef.current} />}
           </div>
         )}
 
         {/* Instructions */}
         <div className="rounded-xl border border-border bg-blue-50 dark:bg-blue-900 p-6">
-          <p className="font-bold text-blue-800 dark:text-blue-200 mb-2">How to Use:</p>
-          <ol className="text-sm text-blue-700 dark:text-blue-300 list-decimal list-inside space-y-1">
-            <li>Create a room or join an existing one</li>
-            <li>Share your Peer ID with others (they need to connect to you)</li>
-            <li>Select your instrument</li>
-            <li>Start playing! Each person can play a different instrument</li>
-            <li>For best results, use the "Connect to Peer" button with each other's Peer IDs</li>
-          </ol>
+          <p className="font-bold text-blue-800 dark:text-blue-200 mb-2">🎵 How Jam Session Works:</p>
+          <div className="text-sm text-blue-700 dark:text-blue-300 space-y-2">
+            <p><strong>What You'll Hear:</strong></p>
+            <ul className="list-disc list-inside ml-2 space-y-1">
+              <li>✅ <strong>Your own sounds</strong> - Play locally on your computer</li>
+              <li>✅ <strong>Other players' sounds</strong> - When connected, you'll hear their instrument sounds on your computer</li>
+              <li>❌ <strong>Video/Cameras</strong> - Not currently streamed (you only see your own camera)</li>
+            </ul>
+            <p className="mt-3"><strong>How to Connect:</strong></p>
+            <ol className="list-decimal list-inside ml-2 space-y-1">
+              <li>One person clicks "Create Room"</li>
+              <li>Share your Peer ID with others (copy button)</li>
+              <li>Others click "Join Room" and enter the room ID</li>
+              <li>Others click "Connect to Peer" and enter your Peer ID</li>
+              <li>Select your instruments and start playing!</li>
+            </ol>
+            <p className="mt-3 text-xs text-blue-600 dark:text-blue-400">
+              💡 <strong>Note:</strong> Each player hears all sounds. When someone plays drums, everyone hears the drums. 
+              This creates a shared musical experience where everyone plays together!
+            </p>
+            <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800">
+              <p className="text-xs font-bold text-red-800 dark:text-red-200 mb-1">⚠️ IMPORTANT: Connection Steps</p>
+              <ol className="text-xs text-red-700 dark:text-red-300 list-decimal list-inside space-y-1">
+                <li>Person A: Create room and copy your Peer ID</li>
+                <li>Person B: Join room with the room ID</li>
+                <li>Person B: Paste Person A's Peer ID and click "Connect to Peer"</li>
+                <li>Person A: Copy Person B's Peer ID and connect to them too</li>
+                <li>Both: You should see each other in "Connected Peers" (green box)</li>
+                <li>Now play! Sounds will be heard by everyone connected.</li>
+              </ol>
+            </div>
+          </div>
         </div>
       </div>
     </div>

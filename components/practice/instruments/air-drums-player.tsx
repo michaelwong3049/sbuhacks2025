@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { DrumKit } from "@/app/lib/sound/drum-kit";
 import CalibrationWizard from "@/components/calibration/CalibrationWizard";
 import { Hands } from "@mediapipe/hands";
+import { PeerManager } from "@/app/lib/webrtc/peer-manager";
 
 type HandsType = {
   setOptions: (options: any) => void;
@@ -14,7 +15,11 @@ type HandsType = {
   close: () => Promise<void>;
 };
 
-export default function Home() {
+interface AirDrumsPlayerProps {
+  peerManager?: PeerManager | null;
+}
+
+export default function AirDrumsPlayer({ peerManager = null }: AirDrumsPlayerProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [handPositions, setHandPositions] = useState<{
@@ -230,13 +235,32 @@ export default function Home() {
                   const distCrash = Math.hypot(indexVisualX - crashX, indexTip.y - crashY);
 
                   // Helper to register hit (set per-hand and per-zone cooldowns and visual flash)
-                  const registerHit = (zoneId: string, play: () => void) => {
+                  const registerHit = (zoneId: string, play: () => void, soundType?: 'snare' | 'kick' | 'hihat' | 'crash') => {
                     const lastDrumTrigger = drumLastTriggerRef.current.get(zoneId) || 0;
                     if ((currentTime - lastDrumTrigger) <= DRUM_COOLDOWN_MS) return false;
                     // pass per-hand cooldown too
                     if ((currentTime - lastTrigger) <= COOLDOWN_MS) return false;
                     // trigger
                     play();
+                    
+                    // Send sound event to peers if peerManager is available
+                    if (peerManager && soundType) {
+                      try {
+                        console.log('📤 Sending sound event to peers:', { type: 'drums', sound: soundType });
+                        peerManager.sendSoundEvent({
+                          type: 'drums',
+                          sound: soundType,
+                        });
+                        console.log('✅ Sound event sent successfully');
+                      } catch (error) {
+                        console.error('❌ Failed to send sound event:', error);
+                      }
+                    } else {
+                      if (!peerManager) {
+                        console.log('ℹ️ No peerManager - playing locally only');
+                      }
+                    }
+                    
                     lastTriggerRef.current.set(handIndex, currentTime);
                     drumLastTriggerRef.current.set(zoneId, currentTime);
                     // record flash
@@ -257,7 +281,7 @@ export default function Home() {
                     // moving towards left drum means horizontalSpeed is negative (leftward) if approaching
                     if (horizontalSpeed < -HORIZ_SPEED_THRESHOLD) {
                       if (drumKitRef.current) {
-                        registerHit("left", () => drumKitRef.current!.playSnare());
+                        registerHit("left", () => drumKitRef.current!.playSnare(), 'snare');
                       }
                     }
 
@@ -271,7 +295,7 @@ export default function Home() {
                       if (horizontalSpeed > HORIZ_SPEED_THRESHOLD) {
                         if (drumKitRef.current) {
                           registerHit("right", () =>
-                            drumKitRef.current!.playSnare()
+                            drumKitRef.current!.playSnare(), 'snare'
                           );
                         }
                       }
@@ -286,7 +310,7 @@ export default function Home() {
                     ) {
                       if (drumKitRef.current) {
                         registerHit("bass", () =>
-                          drumKitRef.current!.playKick()
+                          drumKitRef.current!.playKick(), 'kick'
                         );
                       }
                     }
@@ -303,7 +327,7 @@ export default function Home() {
                     prevHSpeed <= HORIZ_SPEED_THRESHOLD
                   ) {
                     if (drumKitRef.current) {
-                      registerHit("hihat", () => drumKitRef.current!.playHiHat());
+                      registerHit("hihat", () => drumKitRef.current!.playHiHat(), 'hihat');
                     }
                   }
 
@@ -315,7 +339,7 @@ export default function Home() {
                     prevHSpeed >= -HORIZ_SPEED_THRESHOLD
                   ) {
                     if (drumKitRef.current) {
-                      registerHit("crash", () => drumKitRef.current!.playCrash());
+                      registerHit("crash", () => drumKitRef.current!.playCrash(), 'crash');
                     }
                   }
 

@@ -4,7 +4,16 @@
  */
 
 export type Instrument = 'drums' | 'piano' | 'tambourine' | 'triangle';
+
+// Sound event types for different instruments
+export type SoundEvent = 
+  | { type: 'drums'; sound: 'snare' | 'kick' | 'hihat' | 'crash' }
+  | { type: 'piano'; noteIndex: number; velocity?: number }
+  | { type: 'tambourine'; }
+  | { type: 'triangle'; };
+
 export type PeerMessage = 
+  | { type: 'sound-event'; event: SoundEvent; instrument: Instrument }
   | { type: 'hand-data'; data: any; instrument: Instrument }
   | { type: 'instrument-change'; instrument: Instrument }
   | { type: 'join'; instrument: Instrument }
@@ -214,11 +223,26 @@ export class PeerManager {
    * Broadcast message to all connected peers
    */
   broadcast(message: PeerMessage): void {
+    if (this.connections.size === 0) {
+      console.warn('⚠️ No connected peers to broadcast to');
+      return;
+    }
+    
+    let sentCount = 0;
     this.connections.forEach((conn, peerId) => {
       if (conn.open) {
-        conn.send(message);
+        try {
+          conn.send(message);
+          sentCount++;
+          console.log('✅ Sent message to peer:', peerId.substring(0, 8) + '...');
+        } catch (error) {
+          console.error('❌ Failed to send message to peer', peerId, ':', error);
+        }
+      } else {
+        console.warn('⚠️ Connection to peer', peerId, 'is not open');
       }
     });
+    console.log(`📡 Broadcasted to ${sentCount}/${this.connections.size} peers`);
   }
 
   /**
@@ -256,6 +280,19 @@ export class PeerManager {
       data: handData,
       instrument: this.myInstrument,
     });
+  }
+
+  /**
+   * Send sound event to peers (when you play a sound)
+   */
+  sendSoundEvent(event: SoundEvent) {
+    const message = {
+      type: 'sound-event' as const,
+      event,
+      instrument: this.myInstrument,
+    };
+    console.log('📡 Broadcasting sound event to', this.connections.size, 'peers:', message);
+    this.broadcast(message);
   }
 
   /**

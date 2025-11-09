@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Piano } from "@/app/lib/sound/piano";
 import { AutoPaperDetector } from "@/app/lib/vision/auto-paper-detector";
+import { PeerManager } from "@/app/lib/webrtc/peer-manager";
 
 type HandsType = {
   setOptions: (options: any) => void;
@@ -11,7 +12,11 @@ type HandsType = {
   close: () => Promise<void>;
 };
 
-export default function Home() {
+interface PianoPlayerProps {
+  peerManager?: PeerManager | null;
+}
+
+export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [handPositions, setHandPositions] = useState<{
@@ -337,6 +342,21 @@ export default function Home() {
                       const noteName = pianoRef.current.getNotes()[keyIndex];
                       console.log(`🎹 ✅ TRIGGER: Playing key ${keyIndex} (${noteName}) - Z=${indexTipZ.toFixed(3)}`);
                       pianoRef.current.playNote(keyIndex);
+                      
+                      // Send sound event to peers if peerManager is available
+                      if (peerManager) {
+                        try {
+                          console.log('📤 Sending piano sound event to peers:', { type: 'piano', noteIndex: keyIndex });
+                          peerManager.sendSoundEvent({
+                            type: 'piano',
+                            noteIndex: keyIndex,
+                            velocity: 1,
+                          });
+                          console.log('✅ Piano sound event sent successfully');
+                        } catch (error) {
+                          console.error('❌ Failed to send piano sound event:', error);
+                        }
+                      }
                     } else {
                       console.error("❌ Piano ref is null!");
                     }
