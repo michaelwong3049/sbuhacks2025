@@ -4,6 +4,7 @@ import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 
 import { DrumKit } from "@/app/lib/sound/drum-kit";
 import { Piano } from "@/app/lib/sound/piano";
 import { Triangle } from "@/app/lib/sound/triangle";
+import { Tambourine } from "@/app/lib/sound/tambourine";
 import { SoundEvent } from "@/app/lib/webrtc/peer-manager";
 
 interface RemoteSoundPlayerProps {
@@ -25,6 +26,7 @@ const RemoteSoundPlayer = forwardRef<RemoteSoundPlayerHandle, RemoteSoundPlayerP
     const drumKitRef = useRef<DrumKit | null>(null);
     const pianoRef = useRef<Piano | null>(null);
     const triangleRef = useRef<Triangle | null>(null);
+    const tambourineRef = useRef<Tambourine | null>(null);
     const initializedRef = useRef<boolean>(false);
 
     // Initialize sound instruments
@@ -42,6 +44,9 @@ const RemoteSoundPlayer = forwardRef<RemoteSoundPlayerHandle, RemoteSoundPlayerP
           
           triangleRef.current = new Triangle();
           await triangleRef.current.initialize();
+          
+          tambourineRef.current = new Tambourine();
+          await tambourineRef.current.initialize();
           
           initializedRef.current = true;
           console.log("🎵 Remote sound player initialized");
@@ -98,8 +103,12 @@ const RemoteSoundPlayer = forwardRef<RemoteSoundPlayerHandle, RemoteSoundPlayerP
             break;
           
           case 'tambourine':
-            // TODO: Implement tambourine sound
-            console.log("🎵 Remote tambourine sound (not implemented)");
+            if (tambourineRef.current) {
+              console.log('🪘 Playing remote tambourine sound');
+              tambourineRef.current.play();
+            } else {
+              console.error('❌ Tambourine ref is null');
+            }
             break;
         }
       } catch (error) {
@@ -128,6 +137,10 @@ const RemoteSoundPlayer = forwardRef<RemoteSoundPlayerHandle, RemoteSoundPlayerP
               if (!triangleRef.current) {
                 triangleRef.current = new Triangle();
                 await triangleRef.current.initialize();
+              }
+              if (!tambourineRef.current) {
+                tambourineRef.current = new Tambourine();
+                await tambourineRef.current.initialize();
               }
               initializedRef.current = true;
               console.log("🎵 Remote sound player initialized on-demand");
@@ -160,6 +173,10 @@ const RemoteSoundPlayer = forwardRef<RemoteSoundPlayerHandle, RemoteSoundPlayerP
         if (triangleRef.current) {
           triangleRef.current.dispose();
           triangleRef.current = null;
+        }
+        if (tambourineRef.current) {
+          tambourineRef.current.dispose();
+          tambourineRef.current = null;
         }
         initializedRef.current = false;
       };

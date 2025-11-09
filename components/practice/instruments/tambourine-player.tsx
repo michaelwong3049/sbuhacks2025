@@ -237,6 +237,19 @@ export default function TambourinePlayer({
                         // Strong single-hand strike -> ching (not a two-hand slap)
                         playJingle("ching", Math.min(1, speed / 3000));
                         lastTriggerRef.current.set(handIndex, now);
+                        
+                        // Send sound event to peers if peerManager is available
+                        if (peerManager) {
+                          try {
+                            console.log('📤 Sending tambourine sound event to peers:', { type: 'tambourine' });
+                            peerManager.sendSoundEvent({
+                              type: 'tambourine',
+                            });
+                            console.log('✅ Tambourine sound event sent successfully');
+                          } catch (error) {
+                            console.error('❌ Failed to send tambourine sound event:', error);
+                          }
+                        }
 
                         // quick flash for strong strike
                         ctx.beginPath();
@@ -393,6 +406,19 @@ export default function TambourinePlayer({
                       // prefer ching sample
                       playJingle("ching", Math.min(1, speed / 3000));
                       lastTriggerRef.current.set(fistIdx, now2);
+                      
+                      // Send sound event to peers if peerManager is available
+                      if (peerManager) {
+                        try {
+                          console.log('📤 Sending tambourine sound event to peers (fist shake):', { type: 'tambourine' });
+                          peerManager.sendSoundEvent({
+                            type: 'tambourine',
+                          });
+                          console.log('✅ Tambourine sound event sent successfully');
+                        } catch (error) {
+                          console.error('❌ Failed to send tambourine sound event:', error);
+                        }
+                      }
                     }
                   }
 
@@ -443,6 +469,19 @@ export default function TambourinePlayer({
                       });
                       playTambourineSlap(Math.min(1, approachSpeed / 2000));
                       lastHitRef.current = now2;
+                      
+                      // Send sound event to peers if peerManager is available
+                      if (peerManager) {
+                        try {
+                          console.log('📤 Sending tambourine sound event to peers (slap):', { type: 'tambourine' });
+                          peerManager.sendSoundEvent({
+                            type: 'tambourine',
+                          });
+                          console.log('✅ Tambourine sound event sent successfully');
+                        } catch (error) {
+                          console.error('❌ Failed to send tambourine sound event:', error);
+                        }
+                      }
                     }
                   }
                 }

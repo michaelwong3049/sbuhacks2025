@@ -462,38 +462,37 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
             // Draw hand landmarks and highlight index finger
             if (results.multiHandLandmarks) {
               results.multiHandLandmarks.forEach((landmarks: any[], handIndex: number) => {
-                // Draw connections - use raw coordinates, CSS mirroring handles visual flip
-                drawConnections(canvasCtx, landmarks, HAND_CONNECTIONS, canvasWidth, false);
+                // Draw connections - flip coordinates to match mirrored image
+                drawConnections(canvasCtx, landmarks, HAND_CONNECTIONS, canvasWidth, true);
                 
-                // Draw all landmarks - use raw coordinates, CSS mirroring handles visual flip
+                // Draw all landmarks - flip coordinates to match mirrored image
                 drawLandmarks(canvasCtx, landmarks, {
                   color: "#00FF00",
                   lineWidth: 2,
-                }, canvasWidth, false);
+                }, canvasWidth, true);
                 
                 // Highlight index finger tip (landmark 8) - the "piano finger"
                 const indexTipLandmark = landmarks[8];
                 const indexTipZ = indexTipLandmark.z || 0;
                 
-                // Use raw coordinates for finger display - CSS mirroring handles the visual flip
-                const indexTip = {
-                  x: indexTipLandmark.x * canvasWidth,
-                  y: indexTipLandmark.y * canvasHeight,
-                };
+                // Flip coordinates to match mirrored image display
+                const indexTip = toPixelCoords(indexTipLandmark.x, indexTipLandmark.y);
                 
                 // Get key if paper is detected (this is just for visualization display)
-                // Note: Actual key detection happens in the processing loop above
+                // Note: Actual key detection happens in the processing loop above using raw coordinates
                 let keyIndex: number | null = null;
                 let isClose = false;
                 if (paperDetectorRef.current?.isDetected()) {
-                  // Use raw coordinates for detection
-                  const rawKeyIndex = paperDetectorRef.current.getKeyAtPosition(indexTip.x, indexTip.y);
+                  // For display, we need to convert back to raw coordinates for detection
+                  const rawFingerX = indexTipLandmark.x * canvasWidth;
+                  const rawFingerY = indexTipLandmark.y * canvasHeight;
+                  const rawKeyIndex = paperDetectorRef.current.getKeyAtPosition(rawFingerX, rawFingerY);
                   // Mirror the key index to match visual layout
                   keyIndex = rawKeyIndex !== null ? NUM_KEYS - 1 - rawKeyIndex : null;
                   isClose = indexTipZ < Z_TOUCH_THRESHOLD;
                 }
                 
-                // Draw index finger tip with special highlight
+                // Draw index finger tip with special highlight (using flipped coordinates)
                 canvasCtx.fillStyle = isClose ? "#FF0000" : "#FFFF00";
                 canvasCtx.beginPath();
                 canvasCtx.arc(indexTip.x, indexTip.y, 12, 0, Math.PI * 2);
@@ -512,7 +511,7 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
                   // Flip hitbox center coordinates to match mirrored image
                   const flippedHitboxX = canvasWidth - keyRegion.hitboxCenterX;
                   
-                  // Draw line from finger to hitbox center (finger already flipped, hitbox now flipped)
+                  // Draw line from finger to hitbox center (both in flipped coordinates)
                   canvasCtx.strokeStyle = isClose ? "rgba(0, 255, 0, 0.8)" : "rgba(255, 255, 255, 0.3)";
                   canvasCtx.lineWidth = isClose ? 3 : 2;
                   canvasCtx.setLineDash(isClose ? [] : [5, 5]);
@@ -563,17 +562,20 @@ export default function PianoPlayer({ peerManager = null }: PianoPlayerProps = {
                     results.multiHandedness[i]?.label || "";
                   // MediaPipe: landmark 0 is wrist; x,y are normalized [0..1]
                   const wrist = landmarks[0];
-                  // The canvas/video element is mirrored via CSS (scale-x-[-1]) so
-                  // the visual left/right the user sees is flipped. To keep the
-                  // overlay guidance intuitive, compute the visual X by flipping
-                  // the normalized landmark X and assign handedness accordingly
-                  // (MediaPipe's "Left" refers to the subject's left).
+                  // Canvas-based mirroring: we mirror the image when drawing
+                  // MediaPipe labels hands based on camera view (which hand appears on which side in raw video)
+                  // After mirroring: left side of raw video appears on right side visually, and vice versa
+                  // MediaPipe's "Left" = appears on left in raw video = appears on right visually
+                  // MediaPipe's "Right" = appears on right in raw video = appears on left visually
+                  // So we need to swap the labels to match what user sees after mirroring
                   const visualX = 1 - (wrist.x ?? 0);
+                  // Swap labels: MediaPipe's "Left" (raw left, visual right) -> positions.right
+                  //              MediaPipe's "Right" (raw right, visual left) -> positions.left
                   if (handednessLabel.toLowerCase().includes("left")) {
-                    // subject's left appears on the right side of the mirrored view
+                    // Subject's left hand (MediaPipe "Left") appears on visual right after mirroring
                     positions.right = { x: visualX, y: wrist.y };
                   } else if (handednessLabel.toLowerCase().includes("right")) {
-                    // subject's right appears on the left side of the mirrored view
+                    // Subject's right hand (MediaPipe "Right") appears on visual left after mirroring
                     positions.left = { x: visualX, y: wrist.y };
                   }
                 }
@@ -894,10 +896,10 @@ function drawConnections(
   for (const connection of connections) {
     const start = landmarks[connection[0]];
     const end = landmarks[connection[1]];
-    // Use raw coordinates - CSS mirroring handles visual flip
-    const startX = start.x * canvasWidth;
+    // Flip X coordinates if flipForDisplay is true (to match mirrored image)
+    const startX = flipForDisplay ? canvasWidth - (start.x * canvasWidth) : start.x * canvasWidth;
     const startY = start.y * ctx.canvas.height;
-    const endX = end.x * canvasWidth;
+    const endX = flipForDisplay ? canvasWidth - (end.x * canvasWidth) : end.x * canvasWidth;
     const endY = end.y * ctx.canvas.height;
     ctx.moveTo(startX, startY);
     ctx.lineTo(endX, endY);
@@ -914,8 +916,8 @@ function drawLandmarks(
 ) {
   ctx.fillStyle = style.color;
   for (const landmark of landmarks) {
-    // Use raw coordinates - CSS mirroring handles visual flip
-    const x = landmark.x * canvasWidth;
+    // Flip X coordinates if flipForDisplay is true (to match mirrored image)
+    const x = flipForDisplay ? canvasWidth - (landmark.x * canvasWidth) : landmark.x * canvasWidth;
     const y = landmark.y * ctx.canvas.height;
     ctx.beginPath();
     ctx.arc(x, y, 3, 0, 2 * Math.PI);
