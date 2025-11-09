@@ -290,7 +290,7 @@ export default function Home() {
                         );
                       }
                     }
-
+                  }
 
                   // Hi-hat: right-side zone, triggered by a rightward horizontal
                   // motion. We require a rising-edge on horizontal speed to
@@ -305,9 +305,6 @@ export default function Home() {
                     if (drumKitRef.current) {
                       registerHit("hihat", () => drumKitRef.current!.playHiHat());
                     }
-
-                    // store current vertical speed for next-frame edge detection
-                    prevVerticalSpeedRef.current.set(handIndex, verticalSpeed);
                   }
 
                   // Crash: left-side mid zone, triggered by leftward horizontal motion
@@ -326,7 +323,16 @@ export default function Home() {
                   prevVerticalSpeedRef.current.set(handIndex, verticalSpeed);
                   prevHorizontalSpeedRef.current.set(handIndex, horizontalSpeed);
                 }
-              );
+
+                // Update previous position (only index finger, not thumb - this code uses index finger only)
+                previousPositionsRef.current.set(handIndex, {
+                  indexX: indexTip.x,
+                  indexY: indexTip.y,
+                  thumbX: indexTip.x, // Use same as index since we're only tracking index finger
+                  thumbY: indexTip.y,
+                  timestamp: currentTime,
+                });
+              });
             }
 
             canvasCtx.save();

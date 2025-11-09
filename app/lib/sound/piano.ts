@@ -17,13 +17,25 @@ export class Piano {
   private fallbackStrings?: Tone.PolySynth;
   private fallbackHammer?: Tone.NoiseSynth;
 
+  // Main synth setup (used as primary or fallback)
+  private synth?: Tone.PolySynth;
+  private compressor?: Tone.Compressor;
+  private filter?: Tone.Filter;
+  private reverb?: Tone.Reverb;
+
   // C4..E5
   private readonly notes = ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5"];
 
   constructor() {
+    // Synth will be initialized in initToneFallback when needed
+  }
+
+  private async initToneFallback() {
+    // Start Tone.js audio context
+    await Tone.start();
+
     // Create a realistic piano sound using FMSynth with multiple effects
     // This configuration mimics the attack, decay, and harmonics of a real piano
-    
     this.synth = new Tone.PolySynth({
       maxPolyphony: 10,
       voice: Tone.FMSynth,
@@ -67,14 +79,38 @@ export class Piano {
     });
     
     // Add reverb for realistic room sound
-    // Tone.js Reverb constructor takes decay time in seconds
-    this.reverb = new Tone.Reverb(0.5); // 0.5 second decay for spacious sound
+    this.reverb = new Tone.Reverb(0.5); // 0.5 second decay
+    await this.reverb.generate(); // Generate reverb impulse
     
     // Connect: synth -> compressor -> filter -> reverb -> destination
     this.synth.connect(this.compressor);
     this.compressor.connect(this.filter);
     this.filter.connect(this.reverb);
     this.reverb.toDestination();
+
+    // Also set up the fallback synths for the layered approach
+    this.fallbackStrings = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "triangle" },
+      envelope: {
+        attack: 0.02,
+        decay: 0.1,
+        sustain: 0.3,
+        release: 1.2,
+      },
+    }).toDestination();
+
+    this.fallbackHammer = new Tone.NoiseSynth({
+      noise: { type: "white" },
+      envelope: {
+        attack: 0.001,
+        decay: 0.1,
+        sustain: 0,
+        release: 0.1,
+      },
+    }).toDestination();
+
+    this.toneFallback = true;
+    console.log("🎹 Piano initialized (Tone.js fallback)");
   }
 
   async initialize() {
@@ -90,24 +126,9 @@ export class Piano {
       }
     }
 
-    // Attempt to dynamically import soundfont-player at runtime.
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Soundfont = await import("soundfont-player");
-      // If import succeeded, try to create instrument
-      try {
-        this.player = await Soundfont.instrument(this.audioCtx, "acoustic_grand_piano", { gain: 1 });
-        this.initialized = true;
-        console.log("🎹 Piano initialized (soundfont-player) - acoustic_grand_piano ready");
-        return;
-      } catch (err) {
-        console.warn("soundfont-player loaded but failed to create instrument:", err);
-        // fall through to Tone fallback
-      }
-    } catch (err) {
-      // Module not found or dynamic import failed — fall back to Tone.js synth
-      console.warn("soundfont-player not available, falling back to Tone.js synth:", err && err.message ? err.message : err);
-    }
+    // Skip soundfont-player for now - use Tone.js synth directly
+    // (soundfont-player causes build-time module resolution issues in Next.js)
+    // The Tone.js fallback provides good piano sound quality
 
     // Tone fallback
     try {
@@ -142,8 +163,15 @@ export class Piano {
       }
     }
 
-    // Fallback: Tone.js synth layers
-    if (this.toneFallback && this.fallbackStrings) {
+    // Fallback: Use main synth or fallback synths
+    if (this.synth) {
+      try {
+        const vel = Math.max(0.15, Math.min(1, velocity));
+        this.synth.triggerAttackRelease(note, "8n", undefined, vel);
+      } catch (e) {
+        console.error("Failed to play synth note:", e);
+      }
+    } else if (this.toneFallback && this.fallbackStrings) {
       try {
         const vel = Math.max(0.15, Math.min(1, velocity));
         this.fallbackHammer?.triggerAttackRelease("32n", undefined, vel * 0.6);
@@ -172,6 +200,19 @@ export class Piano {
           this.fallbackHammer?.dispose();
         } catch {}
         this.toneFallback = false;
+      }
+
+      if (this.synth) {
+        try {
+          this.synth.dispose();
+          this.compressor?.dispose();
+          this.filter?.dispose();
+          this.reverb?.dispose();
+        } catch {}
+        this.synth = undefined;
+        this.compressor = undefined;
+        this.filter = undefined;
+        this.reverb = undefined;
       }
 
       if (this.audioCtx) {
